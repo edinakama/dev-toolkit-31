@@ -1,58 +1,47 @@
 # dev-toolkit-31
 
-Dev Toolkit 31 is a versatile Python library designed to enhance the development experience by providing a suite of tools for code manipulation, testing, and optimization. With a focus on simplicity and efficiency, this toolkit serves both new and seasoned developers looking to streamline their workflows.
+A high-performance Python utility suite designed to streamline common developer workflows and system automation tasks. This toolkit minimizes boilerplate code, allowing you to focus on shipping robust software faster.
 
 ## Features
 
-- **Code Formatter**: Automatically standardize your Python code style with customizable formatting options.
-- **Performance Profiler**: Identify bottlenecks in your applications with an integrated profiler that analyzes function performance.
-- **Unit Testing Suite**: Quick setup for creating and executing unit tests, complete with code coverage reports.
-- **Dependency Tracker**: Automatically identify and update outdated dependencies in your project, ensuring compatibility and security.
+*   **Config Manager:** Rapidly initialize, validate, and parse YAML/JSON configuration files with type hinting.
+*   **LogStreamer:** A thread-safe logging interface that formats structured output for terminal and file-based debugging simultaneously.
+*   **EnvSync:** An automated environment validator that verifies system dependencies and secret availability before application startup.
+*   **TaskBatcher:** A lightweight decorator-based wrapper for executing asynchronous batch processes with configurable retry logic.
 
 ## Installation
 
-To install dev-toolkit-31, simply run the following command in your terminal:
+Ensure you have Python 3.9+ installed. You can install the toolkit directly via pip:
 
 ```bash
 pip install dev-toolkit-31
 ```
 
-## Basic Usage
+For development installations, clone the repository and use poetry:
 
-After installing, you can start using the toolkit in your Python projects. Here’s a quick example demonstrating how to use the code formatter:
-
-```python
-from dev_toolkit import CodeFormatter
-
-# Sample code with improper formatting
-code = "def my_function():print('Hello, World!')"
-
-# Create an instance of the CodeFormatter
-formatter = CodeFormatter()
-
-# Format the code
-formatted_code = formatter.format(code)
-
-print(formatted_code)  # Output: def my_function(): print('Hello, World!')
+```bash
+git clone https://github.com/Developer/dev-toolkit-31.git
+cd dev-toolkit-31
+poetry install
 ```
 
-### Example for the Performance Profiler:
+## Usage
+
+Integrating `dev-toolkit-31` into your project is seamless. Here is an example of initializing the `ConfigManager` to load project settings:
 
 ```python
-from dev_toolkit import PerformanceProfiler
+from dev_toolkit.config import ConfigManager
 
-def my_function():
-    # Some computation
-    return sum(range(1000))
+# Load and validate settings
+config = ConfigManager(file_path="settings.yaml")
 
-# Profile the function
-with PerformanceProfiler():
-    result = my_function()
-    print(f"Result: {result}")
+if config.is_valid():
+    db_uri = config.get("database_uri")
+    print(f"Connected to: {db_uri}")
 ```
 
 ## License
 
-![MIT License](https://img.shields.io/badge/license-MIT-brightgreen)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Dev Toolkit 31 is released under the MIT License. See the [LICENSE](LICENSE) file for details.
+Distributed under the MIT License. See `LICENSE` for more information.
