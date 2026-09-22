@@ -1,28 +1,39 @@
-import sys
-import traceback
-from typing import Any, Callable, TypeVar, Optional
+import time
+from typing import Callable, Any, List
 
-T = TypeVar('T')
+class AcceleratedRunner:
+    """Dynamic function unroller and JIT-style chain compiler."""
 
-class ToolkitError(Exception):
-    def __init__(self, message: str, original: Optional[Exception] = None):
-        super().__init__(message)
-        self.original = original
+    def __init__(self, *steps: Callable[[Any], Any]):
+        self._steps: List[Callable[[Any], Any]] = list(steps)
+        self._fast_fn: Callable[[Any], Any] = self._build_fast_path()
 
-def resilient_execute(func: Callable[..., T], *args: Any, fallback: Optional[T] = None, **kwargs: Any) -> Optional[T]:
-    try:
-        return func(*args, **kwargs)
-    except ZeroDivisionError as zde:
-        sys.stderr.write(f"⚠️ Mathematical anomaly neutralized: {zde}\n")
-        return fallback
-    except (TypeError, ValueError) as err:
-        sys.stderr.write(f"⚠️ Type/Value disturbance caught: {err}\n")
-        return fallback
-    except Exception as exc:
-        exc_type, exc_value, exc_tb = sys.exc_info()
-        tb_list = traceback.format_tb(exc_tb)
-        clean_tb = "".join(tb_list).strip()
-        sys.stderr.write(f"💥 Unforeseen singularity in {func.__name__}: {exc}\nTraceback:\n{clean_tb}\n")
-        raise ToolkitError(f"Critical failure in {func.__name__}", original=exc) from exc
-    finally:
-        sys.stderr.flush()
+    def _build_fast_path(self) -> Callable[[Any], Any]:
+        if not self._steps:
+            return lambda x: x
+
+        func_names = [f"_fn_{i}" for i in range(len(self._steps))]
+        env = {func_names[i]: fn for i, fn in enumerate(self._steps)}
+
+        lines = ["def __fast_run(data):"]
+        lines.append("    res = data")
+        for name in func_names:
+            lines.append(f"    res = {name}(res)")
+        lines.append("    return res")
+
+        exec("\n".join(lines), env)
+        return env["__fast_run"]
+
+    def pipe(self, step: Callable[[Any], Any]) -> "AcceleratedRunner":
+        self._steps.append(step)
+        self._fast_fn = self._build_fast_path()
+        return self
+
+    def run(self, data: Any) -> Any:
+        return self._fast_fn(data)
+
+    def benchmark_and_warmup(self, sample_data: Any, iterations: int = 100) -> float:
+        start = time.perf_counter()
+        for _ in range(iterations):
+            self._fast_fn(sample_data)
+        return (time.perf_counter() - start) / iterations
