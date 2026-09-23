@@ -1,48 +1,55 @@
-import functools
+import random
 import time
-import json
-from pathlib import Path
-from typing import Callable, Any
+from typing import Callable, Any, Type, Sequence, Generator
 
-def time_execution(func: Callable) -> Callable:
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        print(f'[dev-toolkit-31] {func.__name__} took {time.perf_counter() - start:.4f}s')
-        return result
-    return wrapper
+def _golden_jitter_backoff(base: float, cap: float) -> Generator[float, None, None]:
+    """Generates delays using golden ratio scaling and random jitter."""
+    phi = 1.61803398875
+    current = base
+    while True:
+        jittered = current * (0.8 + random.random() * 0.4)
+        yield min(cap, jittered)
+        current *= phi
 
-def load_json_magic(filepath: str) -> dict:
-    path = Path(filepath)
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
+class RetrySupervisor:
+    """A context-aware wrapper that executes callables with adaptive backoff."""
 
-def memoize_file(filepath: str) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        cache = load_json_magic(filepath)
-        @functools.wraps(func)
-        def wrapper(*args: Any) -> Any:
-            key = str(args)
-            if key not in cache:
-                cache[key] = func(*args)
-                Path(filepath).write_text(json.dumps(cache))
-            return cache[key]
-        return wrapper
-    return decorator
+    def __init__(
+        self,
+        max_attempts: int = 4,
+        base_delay: float = 0.5,
+        max_delay: float = 5.0,
+        exceptions: Sequence[Type[BaseException]] = (Exception,),
+    ):
+        self.max_attempts = max_attempts
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.exceptions = tuple(exceptions)
 
-def retry_softly(attempts: int = 3, delay: float = 0.1):
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            delays = _golden_jitter_backoff(self.base_delay, self.max_delay)
             last_err = None
-            for i in range(attempts):
+
+            for attempt in range(1, self.max_attempts + 1):
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
-                    last_err = e
-                    time.sleep(delay * (i + 1))
-            raise last_err
+                except self.exceptions as err:
+                    last_err = err
+                    if attempt == self.max_attempts:
+                        break
+                    wait_time = next(delays)
+                    time.sleep(wait_time)
+
+            raise RuntimeError(
+                f"Operation '{func.__name__}' failed after {self.max_attempts} attempts"
+            ) from last_err
+
         return wrapper
-    return decorator
+
+def retry_network_op(
+    max_attempts: int = 3,
+    catch: Sequence[Type[BaseException]] = (ConnectionError, TimeoutError, OSError),
+) -> Callable[..., Any]:
+    """Convenience decorator specifically tuned for transient network glitches."""
+    return RetrySupervisor(max_attempts=max_attempts, exceptions=catch)
