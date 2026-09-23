@@ -1,32 +1,29 @@
-import sys
-import time
-from typing import Any, Callable, TextIO
+import logging
+import os
+from logging.handlers import RotatingFileHandler
 
-class QuirkyLogger:
-    """A creatively styled terminal logger for dev-toolkit-31."""
-    
-    def __init__(self, stream: TextIO = sys.stdout, prefix: str = "[DEV-31] ✨") -> None:
-        self.stream = stream
-        self.prefix = prefix
+def get_dev_logger(name='dev-toolkit-31', log_file='dev.log'):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
 
-    def log(self, message: str, level: str = "INFO") -> None:
-        """Emits a stylized log message with a timestamp and visual flair."""
-        timestamp = time.strftime("%H:%M:%S")
-        styled_line = f"{self.prefix} ({timestamp}) [{level.upper()}] -> {message}\n"
-        self.stream.write(styled_line)
-        self.stream.flush()
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
+        )
 
-    def intercept(self, func: Callable[..., Any]) -> Callable[..., Any]:
-        """Decorator to magically log function execution details."""
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            self.log(f"Entering function '{func.__name__}'", "DEBUG")
-            start_time = time.perf_counter()
-            try:
-                result = func(*args, **kwargs)
-                duration = (time.perf_counter() - start_time) * 1000
-                self.log(f"Exited '{func.__name__}' in {duration:.2f}ms", "DEBUG")
-                return result
-            except Exception as exc:
-                self.log(f"Exception in '{func.__name__}': {exc}", "ERROR")
-                raise
-        return wrapper
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=1024 * 1024 * 5,
+            backupCount=3
+        )
+        file_handler.setFormatter(formatter)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+
+    return logger
+
+log = get_dev_logger()
