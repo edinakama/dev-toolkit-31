@@ -1,35 +1,48 @@
 import os
 import json
+from collections import UserDict
 from typing import Any, Dict
 
-class ConfigLoader:
-    def __init__(self, defaults: Dict[str, Any]):
-        self._data = defaults
 
-    def load(self, path: str) -> None:
-        if os.path.exists(path):
-            with open(path, 'r') as f:
+class ConfigLoader(UserDict):
+    """Cascading configuration loader with auto-typing and dot-notation access."""
+
+    def __init__(self, defaults: Dict[str, Any] | None = None, env_prefix: str = "DEV_"):
+        super().__init__()
+        self._defaults = defaults or {}
+        self._env_prefix = env_prefix
+        self.reload()
+
+    def reload(self, source_file: str | None = None) -> "ConfigLoader":
+        file_data = {}
+        if source_file and os.path.exists(source_file):
+            with open(source_file, "r", encoding="utf-8") as f:
                 file_data = json.load(f)
-                self._deep_update(self._data, file_data)
 
-    def _deep_update(self, base: Dict, patch: Dict) -> None:
-        for key, value in patch.items():
-            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                self._deep_update(base[key], value)
-            else:
-                base[key] = value
+        merged = {}
+        for key, default_val in self._defaults.items():
+            val = file_data.get(key, default_val)
+            env_key = f"{self._env_prefix}{key.upper()}"
+            if env_key in os.environ:
+                val = self._cast(os.environ[env_key], type(default_val))
+            merged[key] = val
 
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+        self.data = merged
+        return self
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+    def _cast(self, raw: str, target_type: type) -> Any:
+        if target_type is bool:
+            return raw.lower() in ("true", "1", "yes", "on")
+        try:
+            return target_type(raw)
+        except (ValueError, TypeError):
+            return raw
 
-    def __repr__(self) -> str:
-        return f"ConfigStore({self._data})"
+    def __getattr__(self, name: str) -> Any:
+        if name in self.data:
+            return self.data[name]
+        raise AttributeError(f"Configuration key '{name}' not found")
 
-def load_app_config(config_path: str = "config.json") -> ConfigLoader:
-    defaults = {"port": 8080, "debug": False, "db": {"host": "localhost"}}
-    loader = ConfigLoader(defaults)
-    loader.load(config_path)
-    return loader
+
+def load_config(defaults: Dict[str, Any], path: str | None = None) -> ConfigLoader:
+    return ConfigLoader(defaults).reload(path)
