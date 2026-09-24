@@ -1,35 +1,35 @@
-import json
 import os
+import json
 from typing import Any, Dict
 
 class ConfigLoader:
     def __init__(self, defaults: Dict[str, Any]):
         self._data = defaults
 
+    def load(self, path: str) -> None:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                file_data = json.load(f)
+                self._deep_update(self._data, file_data)
+
+    def _deep_update(self, base: Dict, patch: Dict) -> None:
+        for key, value in patch.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                self._deep_update(base[key], value)
+            else:
+                base[key] = value
+
     def __getitem__(self, key: str) -> Any:
         return self._data[key]
 
-    def load_from_json(self, path: str) -> None:
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                user_config = json.load(f)
-                self._data.update({k: v for k, v in user_config.items() if k in self._data})
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
 
-    def merge_env(self, prefix: str = 'APP_') -> None:
-        for key in self._data.keys():
-            env_val = os.getenv(f"{prefix}{key.upper()}")
-            if env_val:
-                try:
-                    self._data[key] = type(self._data[key])(env_val)
-                except (ValueError, TypeError):
-                    pass
+    def __repr__(self) -> str:
+        return f"ConfigStore({self._data})"
 
-    def export(self) -> Dict[str, Any]:
-        return self._data
-
-def load_app_config(path: str = 'config.json') -> ConfigLoader:
-    defaults = {'host': '127.0.0.1', 'port': 8080, 'debug': False}
-    cfg = ConfigLoader(defaults)
-    cfg.load_from_json(path)
-    cfg.merge_env()
-    return cfg
+def load_app_config(config_path: str = "config.json") -> ConfigLoader:
+    defaults = {"port": 8080, "debug": False, "db": {"host": "localhost"}}
+    loader = ConfigLoader(defaults)
+    loader.load(config_path)
+    return loader
