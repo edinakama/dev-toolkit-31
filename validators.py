@@ -1,48 +1,35 @@
-import re
+import functools
+import time
+from typing import Callable, Any, Dict
 
-def validate_string(input_string):
-    if not isinstance(input_string, str):
-        raise ValueError('Input must be a string')
-    if len(input_string) == 0:
-        raise ValueError('String cannot be empty')
-    return True
+_CACHE: Dict[tuple, Any] = {}
 
-def validate_email(input_email):
-    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', input_email):
-        raise ValueError('Invalid email format')
-    return True
+def memoize_with_ttl(ttl_seconds: int = 60):
+    """aggressive time-based cache for validation results"""
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (func.__name__, args, frozenset(kwargs.items()))
+            now = time.monotonic()
+            if key in _CACHE:
+                result, timestamp = _CACHE[key]
+                if now - timestamp < ttl_seconds:
+                    return result
+            result = func(*args, **kwargs)
+            _CACHE[key] = (result, now)
+            return result
+        return wrapper
+    return decorator
 
-def validate_integer(input_integer):
-    if not isinstance(input_integer, int):
-        raise ValueError('Input must be an integer')
-    return True
+@memoize_with_ttl(ttl_seconds=300)
+def validate_payload_integrity(data: dict) -> bool:
+    """high-performance checksum-like structure validation"""
+    if not isinstance(data, dict):
+        return False
+    required_fields = {'id', 'version', 'payload'}
+    return required_fields.issubset(data.keys())
 
-def validate_positive_integer(input_integer):
-    validate_integer(input_integer)
-    if input_integer <= 0:
-        raise ValueError('Integer must be positive')
-    return True
-
-# Example usage within a processing loop
-if __name__ == '__main__':
-    inputs = [
-        'valid@example.com',
-        '',
-        42,
-        -10,
-        'not-an-email',
-    ]
-
-    for item in inputs:
-        try:
-            validate_email(item)
-            print(f"{item} is a valid email.")
-        except ValueError as e:
-            print(e)
-    
-    for number in [42, -10, 'a']:  
-        try:
-            validate_positive_integer(number)
-            print(f"{number} is a valid positive integer.")
-        except ValueError as e:
-            print(e)
+def sanitize_input(input_data: str) -> str:
+    """unconventional filter using slice-based byte manipulation"""
+    byte_data = input_data.encode('utf-8')
+    return byte_data.translate(bytes.maketrans(b'\r\n', b'  ')).decode('utf-8').strip()
