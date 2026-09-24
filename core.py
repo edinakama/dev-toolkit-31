@@ -1,39 +1,64 @@
+import functools
 import time
-from typing import Callable, Any, List
+from typing import Callable, Any, Dict, Tuple
 
-class AcceleratedRunner:
-    """Dynamic function unroller and JIT-style chain compiler."""
 
-    def __init__(self, *steps: Callable[[Any], Any]):
-        self._steps: List[Callable[[Any], Any]] = list(steps)
-        self._fast_fn: Callable[[Any], Any] = self._build_fast_path()
+class AdaptiveCache:
+    """Dynamic self-tuning memoization cache with execution timing feedback."""
 
-    def _build_fast_path(self) -> Callable[[Any], Any]:
-        if not self._steps:
-            return lambda x: x
+    def __init__(self, target_latency_ms: float = 50.0, max_size: int = 1024):
+        self.target_latency = target_latency_ms / 1000.0
+        self.max_size = max_size
+        self._store: Dict[Tuple[Any, ...], Tuple[Any, float, float]] = {}
+        self._hits = 0
+        self._misses = 0
 
-        func_names = [f"_fn_{i}" for i in range(len(self._steps))]
-        env = {func_names[i]: fn for i, fn in enumerate(self._steps)}
+    def __call__(self, func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.monotonic()
 
-        lines = ["def __fast_run(data):"]
-        lines.append("    res = data")
-        for name in func_names:
-            lines.append(f"    res = {name}(res)")
-        lines.append("    return res")
+            if key in self._store:
+                val, _, expire_time = self._store[key]
+                if now < expire_time:
+                    self._hits += 1
+                    return val
 
-        exec("\n".join(lines), env)
-        return env["__fast_run"]
+            self._misses += 1
+            start_time = time.monotonic()
+            result = func(*args, **kwargs)
+            duration = time.monotonic() - start_time
 
-    def pipe(self, step: Callable[[Any], Any]) -> "AcceleratedRunner":
-        self._steps.append(step)
-        self._fast_fn = self._build_fast_path()
-        return self
+            ttl = max(0.5, duration * 20.0)
+            if len(self._store) >= self.max_size:
+                self._evict_stale(now)
 
-    def run(self, data: Any) -> Any:
-        return self._fast_fn(data)
+            self._store[key] = (result, duration, now + ttl)
+            return result
 
-    def benchmark_and_warmup(self, sample_data: Any, iterations: int = 100) -> float:
-        start = time.perf_counter()
-        for _ in range(iterations):
-            self._fast_fn(sample_data)
-        return (time.perf_counter() - start) / iterations
+        return wrapper
+
+    def _evict_stale(self, current_time: float) -> None:
+        expired = [k for k, v in self._store.items() if current_time >= v[2]]
+        for k in expired:
+            del self._store[k]
+
+        if len(self._store) >= self.max_size:
+            sorted_keys = sorted(self._store.keys(), key=lambda k: self._store[k][1])
+            for k in sorted_keys[: self.max_size // 4]:
+                del self._store[k]
+
+    def stats(self) -> Dict[str, Any]:
+        total = self._hits + self._misses
+        hit_rate = (self._hits / total) if total > 0 else 0.0
+        return {
+            "hits": self._hits,
+            "misses": self._misses,
+            "hit_rate": round(hit_rate, 4),
+            "cached_items": len(self._store),
+        }
+
+
+def memoize_adaptive(target_latency_ms: float = 50.0):
+    return AdaptiveCache(target_latency_ms=target_latency_ms)
