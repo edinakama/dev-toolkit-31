@@ -1,55 +1,34 @@
-import random
-import time
-from typing import Callable, Any, Type, Sequence, Generator
+import json
+import os
+from typing import Any, Dict
 
-def _golden_jitter_backoff(base: float, cap: float) -> Generator[float, None, None]:
-    """Generates delays using golden ratio scaling and random jitter."""
-    phi = 1.61803398875
-    current = base
-    while True:
-        jittered = current * (0.8 + random.random() * 0.4)
-        yield min(cap, jittered)
-        current *= phi
+class ConfigLoader:
+    """Dynamic configuration loader with fallback strategy."""
+    def __init__(self, defaults: Dict[str, Any]):
+        self.config = defaults.copy()
 
-class RetrySupervisor:
-    """A context-aware wrapper that executes callables with adaptive backoff."""
-
-    def __init__(
-        self,
-        max_attempts: int = 4,
-        base_delay: float = 0.5,
-        max_delay: float = 5.0,
-        exceptions: Sequence[Type[BaseException]] = (Exception,),
-    ):
-        self.max_attempts = max_attempts
-        self.base_delay = base_delay
-        self.max_delay = max_delay
-        self.exceptions = tuple(exceptions)
-
-    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            delays = _golden_jitter_backoff(self.base_delay, self.max_delay)
-            last_err = None
-
-            for attempt in range(1, self.max_attempts + 1):
+    def load_from_json(self, path: str) -> 'ConfigLoader':
+        if os.path.exists(path):
+            with open(path, 'r') as f:
                 try:
-                    return func(*args, **kwargs)
-                except self.exceptions as err:
-                    last_err = err
-                    if attempt == self.max_attempts:
-                        break
-                    wait_time = next(delays)
-                    time.sleep(wait_time)
+                    self.config.update(json.load(f))
+                except json.JSONDecodeError:
+                    pass
+        return self
 
-            raise RuntimeError(
-                f"Operation '{func.__name__}' failed after {self.max_attempts} attempts"
-            ) from last_err
+    def load_from_env(self, prefix: str = 'APP_') -> 'ConfigLoader':
+        for key in self.config:
+            env_key = f"{prefix}{key.upper()}"
+            if env_key in os.environ:
+                val = os.environ[env_key]
+                try:
+                    self.config[key] = int(val) if val.isdigit() else val
+                except ValueError:
+                    self.config[key] = val
+        return self
 
-        return wrapper
+    def __getitem__(self, key: str) -> Any:
+        return self.config[key]
 
-def retry_network_op(
-    max_attempts: int = 3,
-    catch: Sequence[Type[BaseException]] = (ConnectionError, TimeoutError, OSError),
-) -> Callable[..., Any]:
-    """Convenience decorator specifically tuned for transient network glitches."""
-    return RetrySupervisor(max_attempts=max_attempts, exceptions=catch)
+    def __repr__(self) -> str:
+        return f"ConfigLoader({self.config})"
