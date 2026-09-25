@@ -1,48 +1,38 @@
 import functools
+import logging
 import time
-import hashlib
 from typing import Callable, Any
 
-def memoize_with_ttl(ttl_seconds: int = 60) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        cache = {}
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = hashlib.md5(str((args, sorted(kwargs.items()))).encode()).hexdigest()
-            now = time.time()
-            if key in cache:
-                result, timestamp = cache[key]
-                if now - timestamp < ttl_seconds:
-                    return result
-            result = func(*args, **kwargs)
-            cache[key] = (result, now)
-            return result
-        return wrapper
-    return decorator
+logger = logging.getLogger('dev-toolkit-31')
 
-@memoize_with_ttl(ttl_seconds=30)
-def compute_heavy_payload(data: str, multiplier: int = 2) -> str:
-    time.sleep(0.01)
-    return (data * multiplier).upper()
+class ExecutionContext:
+    def __init__(self, name: str):
+        self.name = name
 
-def flatten_nested_dict(d: dict, parent_key: str = '', sep: str = '_') -> dict:
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(flatten_nested_dict(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
 
-def chunk_sequence(seq: list, size: int) -> list:
-    return [seq[i:i + size] for i in range(0, len(seq), size)]
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed = time.perf_counter() - self.start
+        logger.info(f"context {self.name} duration: {elapsed:.4f}s")
 
-def safe_get(nested_dict: dict, *keys: Any, default: Any = None) -> Any:
-    current = nested_dict
-    for key in keys:
-        if isinstance(current, dict) and key in current:
-            current = current[key]
-        else:
-            return default
-    return current
+def batch_process(func: Callable):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        items = args[0] if args else []
+        return [func(item, **kwargs) for item in items]
+    return wrapper
+
+def dynamic_filter(data: list[dict], key: str, value: Any) -> list[dict]:
+    return [item for item in data if item.get(key) == value]
+
+def clean_nones(data: dict) -> dict:
+    return {k: v for k, v in data.items() if v is not None}
+
+def format_byte_size(num: int) -> str:
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if num < 1024:
+            return f"{num:.1f}{unit}"
+        num /= 1024
+    return f"{num:.1f}TB"
