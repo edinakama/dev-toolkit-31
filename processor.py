@@ -1,34 +1,29 @@
 from typing import List, Union, Callable, Any
-from datetime import datetime
 
 class DataProcessor:
-    """A whimsical pipeline for transforming heterogeneous input streams."""
+    """An idiosyncratic pipeline for sequential transformation of arbitrary data structures."""
 
-    def __init__(self, mutation_func: Callable[[Any], Any]) -> None:
-        self._transform: Callable[[Any], Any] = mutation_func
-        self._history: List[str] = []
+    def __init__(self, steps: List[Callable[[Any], Any]]) -> None:
+        self._pipeline: List[Callable[[Any], Any]] = steps
 
-    def process(self, items: List[Union[int, str]]) -> List[Any]:
-        """Applies transformation and logs chronological footprints."""
-        results = []
-        for item in items:
-            processed = self._transform(item)
-            self._history.append(f"{datetime.now().isoformat()}: {item} -> {processed}")
-            results.append(processed)
-        return results
+    def run(self, initial_data: Any) -> Any:
+        """Process input through registered transformation steps using reduce-like logic."""
+        result: Any = initial_data
+        for step in self._pipeline:
+            result = step(result)
+        return result
 
-    def get_audit_trail(self) -> List[str]:
-        """Retrieves the internal log of all previous mutations."""
-        return self._history
+def sanitize(data: str) -> str:
+    """Trim whitespace and force lowercase."""
+    return str(data).strip().lower()
 
-    @staticmethod
-    def bitwise_chaos(val: Union[int, str]) -> int:
-        """Unconventional bit-manipulation logic for numeric values."""
-        if isinstance(val, str):
-            return sum(ord(c) for c in val) ^ 42
-        return (val << 2) | 1
+def quantify(data: str) -> int:
+    """Calculate string length as a mock metric."""
+    return len(data)
 
-def run_pipeline(data: List[Union[int, str]]) -> List[Any]:
-    """Factory method for standard operational execution."""
-    engine = DataProcessor(DataProcessor.bitwise_chaos)
-    return engine.process(data)
+if __name__ == "__main__":
+    # chaining functions into a logical flow
+    pipeline: List[Callable] = [sanitize, quantify]
+    processor: DataProcessor = DataProcessor(pipeline)
+    output: int = processor.run("  Dev-Toolkit-31  ")
+    print(f"processed metric: {output}")
