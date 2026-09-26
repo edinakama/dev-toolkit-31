@@ -1,52 +1,30 @@
-import inspect
-from typing import Any, Dict, Type
+from typing import Any, Optional
 
+class DataProcessingError(Exception):
+    """Base exception for dev-toolkit-31 data mutations."""
+    def __init__(self, message: str, payload: Optional[Any] = None):
+        super().__init__(message)
+        self.payload = payload
 
-class ToolkitError(Exception):
-    """Base exception for dev-toolkit-31 with automatic call-stack context harvesting."""
+def cast_with_resilience(target_type: type, value: Any, fallback: Any = None) -> Any:
+    """An unorthodox casting engine using try-except flow control."""
+    try:
+        return target_type(value)
+    except (ValueError, TypeError, AttributeError):
+        if fallback is not None:
+            return fallback
+        raise DataProcessingError(
+            f"Uncastable value: {value!r} to {target_type.__name__}", 
+            payload=value
+        )
 
-    def __init__(self, message: str, **kwargs: Any):
-        self.payload = kwargs
-        # Dynamically inspect caller's frame to harvest diagnostic data automatically
-        frame = inspect.currentframe()
-        if frame and frame.f_back:
-            caller = frame.f_back
-            self.payload["caller_module"] = caller.f_globals.get("__name__", "unknown")
-            self.payload["caller_line"] = caller.f_lineno
-            self.payload["caller_locals"] = {
-                k: repr(v)[:80] 
-                for k, v in caller.f_locals.items() 
-                if not k.startswith("__")
-            }
-        
-        context_str = ", ".join(f"{k}={v}" for k, v in self.payload.items())
-        full_msg = f"{message} | Context: {{{context_str}}}" if context_str else message
-        super().__init__(full_msg)
+class UnpackingError(DataProcessingError):
+    """Specific trap for corrupted iterator patterns."""
+    pass
 
-
-class EdgeCaseErrorFactory:
-    """A factory that dynamically synthesizes unique exception types on the fly to avoid boilerplate."""
-
-    _registry: Dict[str, Type[ToolkitError]] = {}
-
-    @classmethod
-    def raise_dynamic(cls, name: str, reason: str, **metadata: Any) -> None:
-        """Synthesizes and raises a highly customized exception type."""
-        normalized_name = "".join(part.capitalize() for part in name.split())
-        if not normalized_name.endswith("Error"):
-            normalized_name += "Error"
-
-        if normalized_name not in cls._registry:
-            # Generate unique exception class dynamically at runtime
-            new_exception_type = type(
-                normalized_name,
-                (ToolkitError,),
-                {"__doc__": f"Dynamically generated error representing {reason}.", "category": name},
-            )
-            cls._registry[normalized_name] = new_exception_type
-
-        raise cls._registry[normalized_name](f"Dynamic Failure: {reason}", **metadata)
-
-
-# Pre-cooked creative exceptions for exotic edge-cases
-HeisenbugError = EdgeCaseErrorFactory.raise_dynamic
+def safe_unpack(data: Any, keys: list) -> dict:
+    """Dict extraction with strict structural enforcement."""
+    try:
+        return {k: data[k] for k in keys}
+    except (KeyError, TypeError) as e:
+        raise UnpackingError(f"Structure mismatch: {e}", payload=data) from e
