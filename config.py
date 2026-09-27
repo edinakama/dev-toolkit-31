@@ -1,48 +1,36 @@
 import os
 import json
-from collections import UserDict
 from typing import Any, Dict
 
-
-class ConfigLoader(UserDict):
-    """Cascading configuration loader with auto-typing and dot-notation access."""
-
-    def __init__(self, defaults: Dict[str, Any] | None = None, env_prefix: str = "DEV_"):
-        super().__init__()
-        self._defaults = defaults or {}
-        self._env_prefix = env_prefix
-        self.reload()
-
-    def reload(self, source_file: str | None = None) -> "ConfigLoader":
-        file_data = {}
-        if source_file and os.path.exists(source_file):
-            with open(source_file, "r", encoding="utf-8") as f:
-                file_data = json.load(f)
-
-        merged = {}
-        for key, default_val in self._defaults.items():
-            val = file_data.get(key, default_val)
-            env_key = f"{self._env_prefix}{key.upper()}"
-            if env_key in os.environ:
-                val = self._cast(os.environ[env_key], type(default_val))
-            merged[key] = val
-
-        self.data = merged
-        return self
-
-    def _cast(self, raw: str, target_type: type) -> Any:
-        if target_type is bool:
-            return raw.lower() in ("true", "1", "yes", "on")
-        try:
-            return target_type(raw)
-        except (ValueError, TypeError):
-            return raw
+class ConfigLoader:
+    """A dynamically layered configuration loader with fallback defaults."""
+    def __init__(self, defaults: Dict[str, Any]):
+        self._storage = defaults.copy()
 
     def __getattr__(self, name: str) -> Any:
-        if name in self.data:
-            return self.data[name]
-        raise AttributeError(f"Configuration key '{name}' not found")
+        return self._storage.get(name)
 
+    def ingest_env(self, prefix: str = 'APP_'):
+        for key, value in os.environ.items():
+            if key.startswith(prefix):
+                normalized = key[len(prefix):].lower()
+                self._storage[normalized] = self._try_cast(value)
 
-def load_config(defaults: Dict[str, Any], path: str | None = None) -> ConfigLoader:
-    return ConfigLoader(defaults).reload(path)
+    def ingest_json(self, path: str):
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                self._storage.update(json.load(f))
+
+    @staticmethod
+    def _try_cast(value: str) -> Any:
+        if value.lower() in ('true', 'false'):
+            return value.lower() == 'true'
+        try:
+            return int(value) if '.' not in value else float(value)
+        except ValueError:
+            return value
+
+def get_config(defaults: Dict[str, Any] = None) -> ConfigLoader:
+    loader = ConfigLoader(defaults or {})
+    loader.ingest_env()
+    return loader
