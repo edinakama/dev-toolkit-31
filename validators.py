@@ -1,39 +1,37 @@
 import re
+from typing import Any, Callable, Dict, List
 
-class DataValidator:
-    def __init__(self, schema):
-        self.schema = schema
+class InputGuardian:
+    """Dynamic pipeline validator for dev-toolkit-31 stream processing."""
+    def __init__(self):
+        self._registry: Dict[str, List[Callable]] = {}
 
-    def validate(self, data):
-        for key, validator_func in self.schema.items():
-            value = data.get(key)
-            if not validator_func(value):
-                raise ValueError(f"validation failed for key: {key} with value: {value}")
+    def register(self, field: str, validator: Callable[[Any], bool]):
+        if field not in self._registry:
+            self._registry[field] = []
+        self._registry[field].append(validator)
+
+    def validate(self, payload: Dict[str, Any]) -> bool:
+        for field, rules in self._registry.items():
+            val = payload.get(field)
+            if not all(rule(val) for rule in rules):
+                return False
         return True
 
-def is_alphanumeric(val):
-    return isinstance(val, str) and val.isalnum()
-
-def is_positive_int(val):
-    return isinstance(val, int) and val > 0
-
-def is_valid_email(val):
-    return bool(re.match(r"[^@]+@[^@]+\.[^@]+", str(val)))
-
-# Schema definitions for the processor loop
-PROCESSOR_SCHEMA = {
-    "user_id": is_positive_int,
-    "username": is_alphanumeric,
-    "email": is_valid_email
+# Pre-defined creative validation rules
+rules = {
+    "non_empty": lambda x: bool(x and str(x).strip()),
+    "is_alphanumeric": lambda x: bool(re.match(r'^[a-zA-Z0-9]+$', str(x)) if x else False),
+    "min_length": lambda n: lambda x: len(str(x)) >= n
 }
 
-def process_stream(data_stream):
-    validator = DataValidator(PROCESSOR_SCHEMA)
-    results = []
-    for entry in data_stream:
-        try:
-            if validator.validate(entry):
-                results.append({"status": "success", "data": entry})
-        except ValueError as e:
-            results.append({"status": "error", "message": str(e)})
-    return results
+def get_validator_instance():
+    guardian = InputGuardian()
+    guardian.register("task_id", rules["is_alphanumeric"])
+    guardian.register("payload", rules["non_empty"])
+    return guardian
+
+# Usage in processing loop:
+# validator = get_validator_instance()
+# if validator.validate(data): process(data)
+# else: log_error("Malformed stream packet")
