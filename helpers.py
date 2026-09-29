@@ -1,38 +1,39 @@
-from typing import Any, Union, Callable
+import functools
+import logging
+from typing import Callable, Any
 
-class Navigator:
-    """A fluent and safe object navigation utility utilizing operator overloading."""
-    def __init__(self, obj: Any):
-        self._obj = obj
+logger = logging.getLogger('dev-toolkit-31')
 
-    def __truediv__(self, key: Union[str, int, Callable[[Any], Any]]) -> "Navigator":
-        if self._obj is None:
-            return self
+class RecoveryContext:
+    def __init__(self, fallback: Any = None):
+        self.fallback = fallback
+
+def resilient_wrapper(fallback: Any = None):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.warning(f"silent recovery triggered for {func.__name__}: {e}")
+                return fallback
+            except Exception as e:
+                logger.error(f"critical failure in {func.__name__}: {e}")
+                raise
+        return wrapper
+    return decorator
+
+def safe_type_cast(value: Any, target_type: type, default: Any = None) -> Any:
+    try:
+        return target_type(value)
+    except (ValueError, TypeError):
+        return default
+
+def batch_process_safely(items: list, processor: Callable):
+    results = []
+    for item in items:
         try:
-            if callable(key) and not isinstance(key, type):
-                return Navigator(key(self._obj))
-            if isinstance(self._obj, dict):
-                return Navigator(self._obj.get(key))  # type: ignore
-            if isinstance(self._obj, (list, tuple)):
-                return Navigator(self._obj[int(key)])  # type: ignore
-            return Navigator(getattr(self._obj, str(key), None))
-        except (IndexError, KeyError, ValueError, AttributeError, TypeError):
-            return Navigator(None)
-
-    def resolve(self, default: Any = None) -> Any:
-        """Unwraps the final navigated value or returns the default fallback."""
-        return default if self._obj is None else self._obj
-
-    def __repr__(self) -> str:
-        return f"Navigator({self._obj!r})"
-
-
-def dot_path(target: Any, path: str, default: Any = None) -> Any:
-    """Helper to navigate via a dot-separated string path."""
-    nav = Navigator(target)
-    for part in path.split('.'):
-        if part.isdigit():
-            nav = nav / int(part)
-        else:
-            nav = nav / part
-    return nav.resolve(default)
+            results.append(processor(item))
+        except Exception:
+            results.append(None)
+    return results
