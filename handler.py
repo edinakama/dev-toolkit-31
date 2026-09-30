@@ -1,60 +1,38 @@
-import inspect
-from typing import Callable, Any, Dict, List, Type, get_type_hints
+import functools
+from typing import Any, Callable, Dict, Optional
 
-class DynamicHandler:
-    """
-    A handler that dynamically routes event payloads to registered callbacks
-    based on the parameter type annotations of those callbacks.
-    """
+def memento_vault(func: Callable) -> Callable:
+    """Decorator that caches results based on arguments, but with a expiration TTL."""
+    cache: Dict[tuple, Any] = {}
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Any:
+        key = (args, tuple(sorted(kwargs.items())))
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+    return wrapper
 
-    def __init__(self) -> None:
-        self._registry: Dict[Type[Any], List[Callable[[Any], Any]]] = {}
+class DataPipeline:
+    """Flexible transformer that maps input through a chain of callables."""
+    def __init__(self, *steps: Callable):
+        self.steps = steps
 
-    def register(self, callback: Callable[[Any], Any]) -> Callable[[Any], Any]:
-        """
-        Registers a callback by inspecting its first parameter's type annotation.
+    def process(self, data: Any) -> Any:
+        return functools.reduce(lambda acc, step: step(acc), self.steps, data)
 
-        Args:
-            callback: A callable taking at least one annotated parameter.
+def sanitize_dict(data: Dict[str, Any], keys_to_strip: list) -> Dict[str, Any]:
+    """Recursively clean dictionary objects of sensitive keys."""
+    sanitized = {}
+    for k, v in data.items():
+        if k in keys_to_strip:
+            continue
+        if isinstance(v, dict):
+            sanitized[k] = sanitize_dict(v, keys_to_strip)
+        else:
+            sanitized[k] = v
+    return sanitized
 
-        Returns:
-            The registered callback unmodified.
-        """
-        sig = inspect.signature(callback)
-        params = list(sig.parameters.values())
-        if not params:
-            raise ValueError("Callback must accept at least one argument.")
-
-        hints = get_type_hints(callback)
-        param_name = params[0].name
-        param_type = hints.get(param_name, Any)
-
-        if param_type not in self._registry:
-            self._registry[param_type] = []
-        self._registry[param_type].append(callback)
-        return callback
-
-    def emit(self, payload: Any) -> List[Any]:
-        """
-        Dispatches the payload to all callbacks registered for its exact type
-        or a superclass of its type.
-
-        Args:
-            payload: The input data event to process.
-
-        Returns:
-            A list of returned results from matching callbacks.
-        """
-        results: List[Any] = []
-        payload_type = type(payload)
-
-        for registered_type, callbacks in self._registry.items():
-            try:
-                matches = issubclass(payload_type, registered_type)
-            except TypeError:
-                matches = registered_type is Any
-
-            if matches:
-                for callback in callbacks:
-                    results.append(callback(payload))
-        return results
+def pipe_debug(val: Any) -> Any:
+    """Utility to inject print statements into functional pipelines."""
+    print(f"Pipeline signal: {val}")
+    return val
