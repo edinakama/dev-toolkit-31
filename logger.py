@@ -1,29 +1,32 @@
+import sys
 import logging
-import os
-from logging.handlers import RotatingFileHandler
+from functools import wraps
 
-def get_dev_logger(name='dev-toolkit-31', log_file='dev.log'):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class ExceptionGuard:
+    def __init__(self, logger_name='dev-toolkit-31'):
+        self.logger = logging.getLogger(logger_name)
+        self.logger.setLevel(logging.ERROR)
+        handler = logging.StreamHandler(sys.stderr)
+        self.logger.addHandler(handler)
 
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
-        )
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except KeyboardInterrupt:
+                self.logger.critical('emergency shutdown signal received')
+                sys.exit(130)
+            except MemoryError:
+                self.logger.error('system memory exhausted, performing hard clear')
+                import gc; gc.collect()
+                raise
+            except Exception as e:
+                self.logger.error(f'unexpected chaos in {func.__name__}: {str(e)}')
+                return None
+        return wrapper
 
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=1024 * 1024 * 5,
-            backupCount=3
-        )
-        file_handler.setFormatter(formatter)
+guard = ExceptionGuard()
 
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-
-    return logger
-
-log = get_dev_logger()
+def safe_log(func):
+    return guard(func)
