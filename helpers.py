@@ -1,39 +1,53 @@
 import functools
-import logging
-from typing import Callable, Any
+from typing import Any, Callable, Dict, Type
 
-logger = logging.getLogger('dev-toolkit-31')
+class LoopValidationError(ValueError):
+    """Exception raised when incoming processing loop inputs fail validation."""
+    pass
 
-class RecoveryContext:
-    def __init__(self, fallback: Any = None):
-        self.fallback = fallback
+class ValidatedGeneratorProxy:
+    """Proxies a generator to validate values sent into the loop."""
 
-def resilient_wrapper(fallback: Any = None):
-    def decorator(func: Callable):
+    def __init__(self, target_gen: Any, schema: Dict[str, Type]):
+        self.target_gen = target_gen
+        self.schema = schema
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> Any:
+        return self.send(None)
+
+    def send(self, value: Any) -> Any:
+        if value is not None:
+            if not isinstance(value, dict):
+                raise LoopValidationError(
+                    f"Processing loop input must be a dict, got {type(value).__name__}"
+                )
+            for key, expected_type in self.schema.items():
+                if key not in value:
+                    raise LoopValidationError(f"Missing required key: '{key}'")
+                val = value[key]
+                if not isinstance(val, expected_type):
+                    raise LoopValidationError(
+                        f"Key '{key}' must be {expected_type.__name__}, got {type(val).__name__}"
+                    )
+        return self.target_gen.send(value)
+
+    def throw(self, typ: Type[BaseException], val: Any = None, tb: Any = None) -> Any:
+        return self.target_gen.throw(typ, val, tb)
+
+    def close(self) -> None:
+        self.target_gen.close()
+
+def validated_loop(schema: Dict[str, Type]) -> Callable:
+    """
+    Decorator to wrap a generator-based processing loop.
+    Enforces that inputs sent via .send() match the expected schema types.
+    """
+    def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except (ValueError, TypeError, AttributeError) as e:
-                logger.warning(f"silent recovery triggered for {func.__name__}: {e}")
-                return fallback
-            except Exception as e:
-                logger.error(f"critical failure in {func.__name__}: {e}")
-                raise
+        def wrapper(*args: Any, **kwargs: Any) -> ValidatedGeneratorProxy:
+            return ValidatedGeneratorProxy(func(*args, **kwargs), schema)
         return wrapper
     return decorator
-
-def safe_type_cast(value: Any, target_type: type, default: Any = None) -> Any:
-    try:
-        return target_type(value)
-    except (ValueError, TypeError):
-        return default
-
-def batch_process_safely(items: list, processor: Callable):
-    results = []
-    for item in items:
-        try:
-            results.append(processor(item))
-        except Exception:
-            results.append(None)
-    return results
