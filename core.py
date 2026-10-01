@@ -1,64 +1,51 @@
-import functools
 import time
-from typing import Callable, Any, Dict, Tuple
+import functools
+from typing import Callable, Any
 
-
-class AdaptiveCache:
-    """Dynamic self-tuning memoization cache with execution timing feedback."""
-
-    def __init__(self, target_latency_ms: float = 50.0, max_size: int = 1024):
-        self.target_latency = target_latency_ms / 1000.0
-        self.max_size = max_size
-        self._store: Dict[Tuple[Any, ...], Tuple[Any, float, float]] = {}
-        self._hits = 0
-        self._misses = 0
-
-    def __call__(self, func: Callable) -> Callable:
+def retry_execution(retries: int = 3, delay: float = 1.0):
+    def decorator(func: Callable):
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = (args, tuple(sorted(kwargs.items())))
-            now = time.monotonic()
-
-            if key in self._store:
-                val, _, expire_time = self._store[key]
-                if now < expire_time:
-                    self._hits += 1
-                    return val
-
-            self._misses += 1
-            start_time = time.monotonic()
-            result = func(*args, **kwargs)
-            duration = time.monotonic() - start_time
-
-            ttl = max(0.5, duration * 20.0)
-            if len(self._store) >= self.max_size:
-                self._evict_stale(now)
-
-            self._store[key] = (result, duration, now + ttl)
-            return result
-
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for _ in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay)
+            raise last_ex
         return wrapper
+    return decorator
 
-    def _evict_stale(self, current_time: float) -> None:
-        expired = [k for k, v in self._store.items() if current_time >= v[2]]
-        for k in expired:
-            del self._store[k]
+def memoize_instance(func: Callable):
+    cache = {}
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        key = (args, tuple(sorted(kwargs.items())))
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+    return wrapper
 
-        if len(self._store) >= self.max_size:
-            sorted_keys = sorted(self._store.keys(), key=lambda k: self._store[k][1])
-            for k in sorted_keys[: self.max_size // 4]:
-                del self._store[k]
+def safe_execute(default_val: Any = None):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                return default_val
+        return wrapper
+    return decorator
 
-    def stats(self) -> Dict[str, Any]:
-        total = self._hits + self._misses
-        hit_rate = (self._hits / total) if total > 0 else 0.0
-        return {
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_rate": round(hit_rate, 4),
-            "cached_items": len(self._store),
-        }
+def batch_process(iterable: list, size: int):
+    for i in range(0, len(iterable), size):
+        yield iterable[i:i + size]
 
-
-def memoize_adaptive(target_latency_ms: float = 50.0):
-    return AdaptiveCache(target_latency_ms=target_latency_ms)
+def singleton(cls):
+    instances = {}
+    def get_instance(*args, **kwargs):
+        if cls not in instances:
+            instances[cls] = cls(*args, **kwargs)
+        return instances[cls]
+    return get_instance
