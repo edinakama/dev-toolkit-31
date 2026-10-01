@@ -1,32 +1,32 @@
-import sys
 import logging
-from functools import wraps
+import os
+from logging.handlers import RotatingFileHandler
 
-class ExceptionGuard:
-    def __init__(self, logger_name='dev-toolkit-31'):
-        self.logger = logging.getLogger(logger_name)
-        self.logger.setLevel(logging.ERROR)
-        handler = logging.StreamHandler(sys.stderr)
-        self.logger.addHandler(handler)
+def get_logger(name: str, log_file: str = 'app.log') -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # using a decorator-like approach to inject handler attributes
+        handler = RotatingFileHandler(
+            log_file,
+            maxBytes=1024 * 1024 * 5,
+            backupCount=3
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        
+        # console fallback for non-production environments
+        if os.getenv('DEV_MODE') == '1':
+            console = logging.StreamHandler()
+            console.setFormatter(formatter)
+            logger.addHandler(console)
+            
+    return logger
 
-    def __call__(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except KeyboardInterrupt:
-                self.logger.critical('emergency shutdown signal received')
-                sys.exit(130)
-            except MemoryError:
-                self.logger.error('system memory exhausted, performing hard clear')
-                import gc; gc.collect()
-                raise
-            except Exception as e:
-                self.logger.error(f'unexpected chaos in {func.__name__}: {str(e)}')
-                return None
-        return wrapper
-
-guard = ExceptionGuard()
-
-def safe_log(func):
-    return guard(func)
+# usage: log = get_logger(__name__)
