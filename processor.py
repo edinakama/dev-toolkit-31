@@ -1,41 +1,41 @@
-from typing import Callable, Any, Generator, Dict, List, Tuple
+import functools
+import itertools
+from typing import Any, Callable, Dict, List
 
-class ValidationError(Exception):
-    def __init__(self, key: str, value: Any, rule_name: str):
-        super().__init__(f"Validation failed for '{key}'={value!r} on rule '{rule_name}'")
-        self.key, self.value, self.rule_name = key, value, rule_name
+class DataPipeline:
+    def __init__(self, processors: List[Callable[[Any], Any]]):
+        self.pipeline = processors
 
-class StreamValidator:
-    def __init__(self, **schema: Callable[[Any], bool]):
-        self.schema = schema
+    def execute(self, data: Any) -> Any:
+        return functools.reduce(lambda acc, proc: proc(acc), self.pipeline, data)
 
-    def __ror__(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(item, dict):
-            raise ValidationError("root", type(item).__name__, "must_be_dict")
-        for key, predicate in self.schema.items():
-            if key not in item:
-                raise ValidationError(key, None, "presence_check")
-            if not predicate(item[key]):
-                raise ValidationError(key, item[key], getattr(predicate, "__name__", "predicate"))
-        return item
+class ProcessorRegistry:
+    def __init__(self):
+        self._registry: Dict[str, Callable] = {}
 
-def process_batch(stream: List[Dict[str, Any]], validator: StreamValidator) -> Generator[Tuple[bool, Dict[str, Any]], None, None]:
-    """Main processing loop using pipe-syntax input validation."""
-    for index, raw_item in enumerate(stream):
-        try:
-            valid_item = raw_item | validator
-            transformed = {k: v.strip().lower() if isinstance(v, str) else v for k, v in valid_item.items()}
-            yield (True, {"seq": index, "payload": transformed})
-        except ValidationError as err:
-            yield (False, {"seq": index, "error": str(err), "raw": raw_item})
+    def register(self, name: str):
+        def decorator(func: Callable):
+            self._registry[name] = func
+            return func
+        return decorator
 
-def is_positive_int(val: Any) -> bool:
-    return isinstance(val, int) and val > 0
+    def get_chain(self, names: List[str]) -> List[Callable]:
+        return [self._registry[n] for n in names if n in self._registry]
 
-def is_nonempty_str(val: Any) -> bool:
-    return isinstance(val, str) and bool(val.strip())
+def sanitize(data: str) -> str:
+    return data.strip().lower()
 
-if __name__ == "__main__":
-    validator = StreamValidator(id=is_positive_int, action=is_nonempty_str)
-    batch = [
-        {"id": 1, "action": "START\
+def tokenize(data: str) -> List[str]:
+    return data.split(' ')
+
+def filter_empty(tokens: List[str]) -> List[str]:
+    return [t for t in tokens if t]
+
+def run_transformation(raw_data: str) -> List[str]:
+    ops = [sanitize, tokenize, filter_empty]
+    pipeline = DataPipeline(ops)
+    return pipeline.execute(raw_data)
+
+if __name__ == '__main__':
+    result = run_transformation('  dev-toolkit-31  is  cool  ')
+    print(f'Processed sequence: {result}')
