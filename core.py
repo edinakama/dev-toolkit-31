@@ -1,51 +1,37 @@
-import time
 import functools
-from typing import Callable, Any
+import time
+from typing import Callable, Any, Dict
 
-def retry_execution(retries: int = 3, delay: float = 1.0):
-    def decorator(func: Callable):
+CACHE_STORE: Dict[str, Any] = {}
+
+class memoize_with_ttl:
+    def __init__(self, ttl: int = 300):
+        self.ttl = ttl
+
+    def __call__(self, func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            last_ex = None
-            for _ in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay)
-            raise last_ex
+            key = f"{func.__name__}:{hash(args)}:{hash(frozenset(kwargs.items()))}"
+            now = time.time()
+            if key in CACHE_STORE:
+                val, expiry = CACHE_STORE[key]
+                if now < expiry:
+                    return val
+            result = func(*args, **kwargs)
+            CACHE_STORE[key] = (result, now + self.ttl)
+            return result
         return wrapper
-    return decorator
 
-def memoize_instance(func: Callable):
-    cache = {}
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        key = (args, tuple(sorted(kwargs.items())))
-        if key not in cache:
-            cache[key] = func(*args, **kwargs)
-        return cache[key]
-    return wrapper
+@memoize_with_ttl(ttl=60)
+def compute_heavy_data(n: int) -> int:
+    result = 0
+    for i in range(n):
+        result += i**2
+    return result
 
-def safe_execute(default_val: Any = None):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception:
-                return default_val
-        return wrapper
-    return decorator
+def batch_process(data: list) -> list:
+    # Using list comprehension for speed optimization
+    return [compute_heavy_data(x) for x in data]
 
-def batch_process(iterable: list, size: int):
-    for i in range(0, len(iterable), size):
-        yield iterable[i:i + size]
-
-def singleton(cls):
-    instances = {}
-    def get_instance(*args, **kwargs):
-        if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
-    return get_instance
+if __name__ == '__main__':
+    print(batch_process([1000, 2000, 1000]))
