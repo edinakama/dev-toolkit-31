@@ -1,53 +1,45 @@
-import functools
-from typing import Any, Callable, Dict, Type
+import inspect
+from typing import Callable, Any, List
 
-class LoopValidationError(ValueError):
-    """Exception raised when incoming processing loop inputs fail validation."""
-    pass
+class Flow:
+    """A creative pipelines helper allowing functional chaining via operators."""
+    def __init__(self, value: Any = None):
+        self._value = value
+        self._steps: List[Callable] = []
 
-class ValidatedGeneratorProxy:
-    """Proxies a generator to validate values sent into the loop."""
+    def __or__(self, other: Callable[[Any], Any]) -> 'Flow':
+        if not callable(other):
+            raise TypeError("Flow step must be a callable.")
+        new_flow = Flow(self._value)
+        new_flow._steps = self._steps + [other]
+        return new_flow
 
-    def __init__(self, target_gen: Any, schema: Dict[str, Type]):
-        self.target_gen = target_gen
-        self.schema = schema
+    def __rshift__(self, other: Any) -> Any:
+        """Evaluates the pipeline with the provided initial input."""
+        val = other if self._value is None else self._value
+        for step in self._steps:
+            sig = inspect.signature(step)
+            params = list(sig.parameters.values())
+            if len(params) == 0:
+                val = step()
+            else:
+                val = step(val)
+        return val
 
-    def __iter__(self):
-        return self
+    def execute(self) -> Any:
+        return self >> self._value
 
-    def __next__(self) -> Any:
-        return self.send(None)
-
-    def send(self, value: Any) -> Any:
-        if value is not None:
-            if not isinstance(value, dict):
-                raise LoopValidationError(
-                    f"Processing loop input must be a dict, got {type(value).__name__}"
-                )
-            for key, expected_type in self.schema.items():
-                if key not in value:
-                    raise LoopValidationError(f"Missing required key: '{key}'")
-                val = value[key]
-                if not isinstance(val, expected_type):
-                    raise LoopValidationError(
-                        f"Key '{key}' must be {expected_type.__name__}, got {type(val).__name__}"
-                    )
-        return self.target_gen.send(value)
-
-    def throw(self, typ: Type[BaseException], val: Any = None, tb: Any = None) -> Any:
-        return self.target_gen.throw(typ, val, tb)
-
-    def close(self) -> None:
-        self.target_gen.close()
-
-def validated_loop(schema: Dict[str, Type]) -> Callable:
-    """
-    Decorator to wrap a generator-based processing loop.
-    Enforces that inputs sent via .send() match the expected schema types.
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> ValidatedGeneratorProxy:
-            return ValidatedGeneratorProxy(func(*args, **kwargs), schema)
+def safeguard(default_value: Any):
+    """Decorator helper to wrap functions in a try-except returning default."""
+    def decorator(func: Callable):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                return default_value
         return wrapper
     return decorator
+
+to_upper = safeguard("")(lambda s: str(s).upper())
+to_words = safeguard([])(lambda s: str(s).split())
+slugify = safeguard("")(lambda s: "-".join(str(s).lower().split()))
