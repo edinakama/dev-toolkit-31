@@ -1,58 +1,42 @@
+import json
 import os
 from typing import Any, Dict
 
-class ConfigNode:
-    """Enables attribute-style access to nested dictionary configurations."""
-    def __init__(self, data: Dict[str, Any]):
-        self.__dict__['_data'] = data
+class ConfigLoader:
+    def __init__(self, defaults: Dict[str, Any] = None):
+        self._data = defaults or {}
 
-    def __getattr__(self, name: str) -> Any:
-        if name not in self._data:
-            raise AttributeError(f"Configuration option {name!r} is undefined")
-        val = self._data[name]
-        return ConfigNode(val) if isinstance(val, dict) else val
+    def load(self, path: str) -> None:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                file_data = json.load(f)
+                self._deep_merge(self._data, file_data)
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        raise TypeError("Configuration instances are read-only")
-
-    def get(self, name: str, default: Any = None) -> Any:
-        return self._data.get(name, default)
-
-class Configuration:
-    """Layered configuration container supporting bitwise merge operator."""
-    def __init__(self, **defaults: Any):
-        self._store = defaults
-
-    def __or__(self, other: Dict[str, Any]) -> "Configuration":
-        """Merges another dictionary, returning a new configuration state."""
-        if not isinstance(other, dict):
-            raise TypeError("Can only merge with a dictionary")
-        merged = self._deep_merge(self._store, other)
-        new_config = Configuration()
-        new_config._store = merged
-        return new_config
-
-    def _deep_merge(self, base: dict, update: dict) -> dict:
-        result = base.copy()
-        for k, v in update.items():
-            if isinstance(v, dict) and isinstance(result.get(k), dict):
-                result[k] = self._deep_merge(result[k], v)
+    def _deep_merge(self, base: Dict, overrides: Dict) -> None:
+        for key, value in overrides.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                self._deep_merge(base[key], value)
             else:
-                result[k] = v
-        return result
+                base[key] = value
 
-    def load_env(self, prefix: str = "APP_") -> "Configuration":
-        """Extracts environment variables starting with prefix to update config."""
-        env_updates: Dict[str, Any] = {}
-        for key, val in os.environ.items():
-            if key.startswith(prefix):
-                parts = key[len(prefix):].lower().split("__")
-                current = env_updates
-                for part in parts[:-1]:
-                    current = current.setdefault(part, {})
-                current[parts[-1]] = val
-        return self | env_updates
+    def get(self, key: str, default: Any = None) -> Any:
+        keys = key.split('.')
+        val = self._data
+        try:
+            for k in keys:
+                val = val[k]
+            return val
+        except (KeyError, TypeError):
+            return default
 
-    def build(self) -> ConfigNode:
-        """Finalizes configuration into an immutable, attribute-accessible object."""
-        return ConfigNode(self._store)
+    def __getitem__(self, key: str) -> Any:
+        return self.get(key)
+
+    @classmethod
+    def from_env(cls, prefix: str, schema: Dict[str, Any]) -> 'ConfigLoader':
+        loader = cls(schema)
+        for key in schema:
+            env_val = os.getenv(f"{prefix}_{key.upper()}")
+            if env_val:
+                loader._data[key] = env_val
+        return loader
