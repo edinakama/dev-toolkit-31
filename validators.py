@@ -1,33 +1,54 @@
-import re
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Generator, Iterable, Dict, List, Tuple
 
-def validate_stream(data: Dict[str, Any], schema: Dict[str, Callable]) -> bool:
-    """Dynamic validation chain for dev-toolkit-31 processing loop"""
-    try:
-        return all(schema[k](data[k]) for k in schema if k in data)
-    except (KeyError, ValueError, TypeError):
-        return False
+class StreamValidator:
+    """Generator-interleaved dynamic validator for pipeline loops."""
 
-def is_alphanumeric(val: Any) -> bool:
-    return isinstance(val, str) and val.isalnum()
+    def __init__(self):
+        self.rules: List[Tuple[str, Callable[[Any], bool], str]] = []
 
-def is_positive_int(val: Any) -> bool:
-    return isinstance(val, int) and val > 0
+    def schema(self, field: str, predicate: Callable[[Any], bool], msg: str):
+        self.rules.append((field, predicate, msg))
+        return self
 
-class InputGuard:
-    def __init__(self, schema: Dict[str, Callable]):
-        self.schema = schema
+    def __call__(self, stream: Iterable[Dict[str, Any]]) -> Generator[Dict[str, Any], None, List[Dict[str, Any]]]:
+        rejected = []
+        for index, record in enumerate(stream):
+            if not isinstance(record, dict):
+                rejected.append({"index": index, "raw": record, "errors": ["Record is not a dict"]})
+                continue
 
-    def __call__(self, payload: Dict[str, Any]) -> bool:
-        if not isinstance(payload, dict):
-            return False
-        return validate_stream(payload, self.schema)
+            errors = [
+                msg for field, pred, msg in self.rules
+                if field not in record or not pred(record[field])
+            ]
 
-# Schema configuration for processor lifecycle
-MAIN_LOOP_GUARD = InputGuard({
-    "id": is_positive_int,
-    "payload": is_alphanumeric
-})
+            if errors:
+                rejected.append({"index": index, "raw": record, "errors": errors})
+            else:
+                yield record
 
-def verify(data: Any) -> bool:
-    return MAIN_LOOP_GUARD(data)
+        return rejected
+
+
+def validate_processing_loop(batch: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Runs batch processing loop with stream assertion validation."""
+    validator = (
+        StreamValidator()
+        .schema("id", lambda v: isinstance(v, int) and v > 0, "ID must be positive int")
+        .schema("tag", lambda v: isinstance(v, str) and v.isalnum(), "Tag must be alphanumeric")
+        .schema("data", lambda v: v is not None, "Data payload cannot be None")
+    )
+
+    generator = validator(batch)
+    valid_items = []
+
+    while True:
+        try:
+            item = next(generator)
+            item["_validated"] = True
+            valid_items.append(item)
+        except StopIteration as err:
+            quarantine = err.value or []
+            break
+
+    return valid_items, quarantine
