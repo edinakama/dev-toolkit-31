@@ -1,38 +1,40 @@
 import functools
-from typing import Any, Callable, Dict, Optional
+import time
+import logging
 
-def memento_vault(func: Callable) -> Callable:
-    """Decorator that caches results based on arguments, but with a expiration TTL."""
-    cache: Dict[tuple, Any] = {}
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs) -> Any:
-        key = (args, tuple(sorted(kwargs.items())))
-        if key not in cache:
-            cache[key] = func(*args, **kwargs)
-        return cache[key]
-    return wrapper
+logging.basicConfig(level=logging.INFO)
 
-class DataPipeline:
-    """Flexible transformer that maps input through a chain of callables."""
-    def __init__(self, *steps: Callable):
-        self.steps = steps
+def retry_operation(retries=3, delay=1):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for i in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay * (2 ** i))
+            raise last_ex
+        return wrapper
+    return decorator
 
-    def process(self, data: Any) -> Any:
-        return functools.reduce(lambda acc, step: step(acc), self.steps, data)
+def batch_process(iterable, chunk_size=10):
+    for i in range(0, len(iterable), chunk_size):
+        yield iterable[i:i + chunk_size]
 
-def sanitize_dict(data: Dict[str, Any], keys_to_strip: list) -> Dict[str, Any]:
-    """Recursively clean dictionary objects of sensitive keys."""
-    sanitized = {}
-    for k, v in data.items():
-        if k in keys_to_strip:
-            continue
-        if isinstance(v, dict):
-            sanitized[k] = sanitize_dict(v, keys_to_strip)
-        else:
-            sanitized[k] = v
-    return sanitized
+def sanitize_dict(d, keys_to_strip=None):
+    keys_to_strip = keys_to_strip or set()
+    return {k: v for k, v in d.items() if k not in keys_to_strip}
 
-def pipe_debug(val: Any) -> Any:
-    """Utility to inject print statements into functional pipelines."""
-    print(f"Pipeline signal: {val}")
-    return val
+class ExecutionContext:
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        logging.info(f'Starting operation: {self.name}')
+        self.start = time.perf_counter()
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed = time.perf_counter() - self.start
+        logging.info(f'Finished {self.name} in {elapsed:.4f}s')
+        return False
