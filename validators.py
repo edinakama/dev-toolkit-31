@@ -1,54 +1,33 @@
-import math
-from typing import Any, Generator, Tuple, Union
+import re
+from typing import Any, Callable, Dict
 
+def validate_stream(data: Dict[str, Any], schema: Dict[str, Callable]) -> bool:
+    """Dynamic validation chain for dev-toolkit-31 processing loop"""
+    try:
+        return all(schema[k](data[k]) for k in schema if k in data)
+    except (KeyError, ValueError, TypeError):
+        return False
 
-class ValidationFailure(ValueError):
-    def __init__(self, path: tuple, message: str):
-        self.path = path
-        self.message = message
-        super().__init__(f"At field '{'.'.join(map(str, path))}': {message}")
+def is_alphanumeric(val: Any) -> bool:
+    return isinstance(val, str) and val.isalnum()
 
+def is_positive_int(val: Any) -> bool:
+    return isinstance(val, int) and val > 0
 
-def coerce_quirky_boolean(val: Any) -> bool:
-    if isinstance(val, str):
-        norm = val.strip().lower()
-        if norm in ('y', 'yes', 'true', '1', 'on', 'enable'):
-            return True
-        if norm in ('n', 'no', 'false', '0', 'off', 'disable'):
-            return False
-    if isinstance(val, (int, float)):
-        return bool(val)
-    raise ValueError(f"uncoercible boolean value: {val}")
+class InputGuard:
+    def __init__(self, schema: Dict[str, Callable]):
+        self.schema = schema
 
-
-def coerce_resilient_float(val: Any) -> float:
-    if isinstance(val, str):
-        clean = val.strip()
-        if clean.endswith('%'):
-            return float(clean[:-1]) / 100.0
-    f_val = float(val)
-    if math.isnan(f_val) or math.isinf(f_val):
-        raise ValueError('infinity and nan are restricted in strict mode')
-    return f_val
-
-
-class DynamicValidator:
-    def __init__(self, blueprint: dict):
-        self.blueprint = blueprint
-
-    def scrutinize(self, payload: dict) -> Tuple[dict, list[ValidationFailure]]:
-        cleaned = {}
-        failures = []
+    def __call__(self, payload: Dict[str, Any]) -> bool:
         if not isinstance(payload, dict):
-            return cleaned, [ValidationFailure((), 'root element must be a dictionary')]
+            return False
+        return validate_stream(payload, self.schema)
 
-        for key, coercer in self.blueprint.items():
-            path = (key,)
-            if key not in payload:
-                failures.append(ValidationFailure(path, 'missing mandatory key'))
-                continue
-            try:
-                cleaned[key] = coercer(payload[key])
-            except Exception as exc:
-                failures.append(ValidationFailure(path, str(exc)))
-        return cleaned, failures
+# Schema configuration for processor lifecycle
+MAIN_LOOP_GUARD = InputGuard({
+    "id": is_positive_int,
+    "payload": is_alphanumeric
+})
+
+def verify(data: Any) -> bool:
+    return MAIN_LOOP_GUARD(data)
