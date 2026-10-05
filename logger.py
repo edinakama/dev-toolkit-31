@@ -1,60 +1,34 @@
 import sys
 import time
-from typing import Any, Callable, TextIO, Union
+import inspect
+from datetime import datetime
 
-class ChromaticLogger:
-    """A colorful stream logger with dynamic severity tinting and execution timing.
-    
-    Transforms plain log payloads into color-coded, timestamped terminal output
-    using ANSI escape sequences and custom formatting pipelines.
-    """
+def log_dispatch(level, message):
+    caller = inspect.stack()[2]
+    context = f"{caller.filename.split('/')[-1]}:{caller.lineno}"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    output = f"[{timestamp}] [{level.upper()}] ({context}) -> {message}"
+    sys.stdout.write(f"{output}\n")
+    sys.stdout.flush()
 
-    PALETTE: dict[str, str] = {
-        "DEBUG": "\033[36m",
-        "INFO": "\033[32m",
-        "WARN": "\033[33m",
-        "ERROR": "\033[31m",
-        "RESET": "\033[0m",
-    }
+class CreativeLogger:
+    def __init__(self, prefix="dev-toolkit-31"):
+        self.prefix = prefix
 
-    def __init__(self, stream: TextIO = sys.stdout, show_time: bool = True) -> None:
-        self.stream: TextIO = stream
-        self.show_time: bool = show_time
+    def info(self, msg):
+        log_dispatch("info", f"{self.prefix} | {msg}")
 
-    def _paint(self, level: str, message: str) -> str:
-        color: str = self.PALETTE.get(level.upper(), self.PALETTE["RESET"])
-        reset: str = self.PALETTE["RESET"]
-        stamp: str = f"[{time.strftime('%H:%M:%S')}] " if self.show_time else ""
-        return f"{color}{stamp}[{level.upper()}] {message}{reset}\n"
+    def warn(self, msg):
+        log_dispatch("warn", f"{self.prefix} | !!! {msg} !!!")
 
-    def emit(self, level: str, payload: Union[str, Exception, Any]) -> int:
-        """Writes formatted color output to the configured text stream.
+    def error(self, msg):
+        log_dispatch("crit", f"{self.prefix} | >>> {msg.upper()} <<<")
 
-        Args:
-            level: Severity tag determining the ANSI palette color.
-            payload: Raw object or error to stringify and log.
-
-        Returns:
-            Count of characters written to the target stream.
-        """
-        formatted: str = self._paint(level, str(payload))
-        written: int = self.stream.write(formatted)
-        self.stream.flush()
-        return written
-
-    def trace_execution(self, level: str = "INFO") -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Decorator that logs entry, exit, and runtime duration of functions."""
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start: float = time.perf_counter()
-                self.emit(level, f"Entering '{func.__name__}'")
-                try:
-                    result: Any = func(*args, **kwargs)
-                    elapsed: float = (time.perf_counter() - start) * 1000
-                    self.emit(level, f"Exited '{func.__name__}' in {elapsed:.2f}ms")
-                    return result
-                except Exception as err:
-                    self.emit("ERROR", f"Failed '{func.__name__}': {err}")
-                    raise
-            return wrapper
-        return decorator
+    def stopwatch(func):
+        def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            result = func(*args, **kwargs)
+            elapsed = time.perf_counter() - start
+            log_dispatch("perf", f"function {func.__name__} took {elapsed:.4f}s")
+            return result
+        return wrapper
