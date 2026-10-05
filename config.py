@@ -1,42 +1,36 @@
-import json
 import os
-from typing import Any, Dict
+import json
+import logging
 
 class ConfigLoader:
-    def __init__(self, defaults: Dict[str, Any] = None):
-        self._data = defaults or {}
+    """Dynamic config handler with defensive fallbacks."""
+    def __init__(self, path: str = 'settings.json'):
+        self.path = path
+        self.data = {}
 
-    def load(self, path: str) -> None:
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                file_data = json.load(f)
-                self._deep_merge(self._data, file_data)
+    def load(self) -> dict:
+        try:
+            if not os.path.exists(self.path):
+                raise FileNotFoundError(f"missing {self.path}")
+            with open(self.path, 'r') as f:
+                self.data = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError, PermissionError) as e:
+            logging.warning(f"config loading failure: {e}. applying emergency defaults.")
+            self.data = self._get_emergency_defaults()
+        return self.data
 
-    def _deep_merge(self, base: Dict, overrides: Dict) -> None:
-        for key, value in overrides.items():
-            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                self._deep_merge(base[key], value)
-            else:
-                base[key] = value
+    def _get_emergency_defaults(self) -> dict:
+        return {"env": "sandbox", "retries": 3, "timeout": 30.0}
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get_safe(self, key: str, fallback=None):
+        """Access nested keys with dot notation."""
         keys = key.split('.')
-        val = self._data
+        val = self.data
         try:
             for k in keys:
                 val = val[k]
             return val
         except (KeyError, TypeError):
-            return default
+            return fallback
 
-    def __getitem__(self, key: str) -> Any:
-        return self.get(key)
-
-    @classmethod
-    def from_env(cls, prefix: str, schema: Dict[str, Any]) -> 'ConfigLoader':
-        loader = cls(schema)
-        for key in schema:
-            env_val = os.getenv(f"{prefix}_{key.upper()}")
-            if env_val:
-                loader._data[key] = env_val
-        return loader
+loader = ConfigLoader()
