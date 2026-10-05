@@ -1,40 +1,54 @@
-import functools
-import time
-import logging
+import re
+from typing import Any, Dict, List, Union
 
-logging.basicConfig(level=logging.INFO)
+class DeepDataDriller:
+    """
+    An extractor supporting dotted paths, index lookup, and wildcard mappings.
+    """
+    def __init__(self, data: Union[Dict, List]):
+        self.data = data
 
-def retry_operation(retries=3, delay=1):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_ex = None
-            for i in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay * (2 ** i))
-            raise last_ex
-        return wrapper
-    return decorator
+    def drill(self, path: str, default: Any = None) -> Any:
+        # Splitting on dots and bracket characters
+        tokens = [t for t in re.split(r'\.|\[|\]', path) if t]
+        return self._resolve(self.data, tokens, default)
 
-def batch_process(iterable, chunk_size=10):
-    for i in range(0, len(iterable), chunk_size):
-        yield iterable[i:i + chunk_size]
+    def _resolve(self, current: Any, tokens: List[str], default: Any) -> Any:
+        if not tokens:
+            return current
 
-def sanitize_dict(d, keys_to_strip=None):
-    keys_to_strip = keys_to_strip or set()
-    return {k: v for k, v in d.items() if k not in keys_to_strip}
+        head, tail = tokens[0], tokens[1:]
 
-class ExecutionContext:
-    def __init__(self, name):
-        self.name = name
-    def __enter__(self):
-        logging.info(f'Starting operation: {self.name}')
-        self.start = time.perf_counter()
-        return self
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        elapsed = time.perf_counter() - self.start
-        logging.info(f'Finished {self.name} in {elapsed:.4f}s')
-        return False
+        if head == '*':
+            if isinstance(current, list):
+                results = []
+                for item in current:
+                    val = self._resolve(item, tail, default)
+                    if val is not default:
+                        results.append(val)
+                return results if results else default
+            return default
+
+        if isinstance(current, dict):
+            if head in current:
+                return self._resolve(current[head], tail, default)
+            # Fallback for dicts with integer keys
+            try:
+                int_key = int(head)
+                if int_key in current:
+                    return self._resolve(current[int_key], tail, default)
+            except ValueError:
+                pass
+        elif isinstance(current, list):
+            try:
+                idx = int(head)
+                if -len(current) <= idx < len(current):
+                    return self._resolve(current[idx], tail, default)
+            except ValueError:
+                pass
+
+        return default
+
+def extract(data: Union[Dict, List], path: str, default: Any = None) -> Any:
+    """Extract nested structures safely using dynamic dotted and wildcard syntax."""
+    return DeepDataDriller(data).drill(path, default)
