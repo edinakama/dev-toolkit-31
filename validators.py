@@ -1,54 +1,38 @@
-from typing import Any, Callable, Generator, Iterable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
-class StreamValidator:
-    """Generator-interleaved dynamic validator for pipeline loops."""
-
+class InputGuardian:
+    """Curated validation strategies for input streams."""
     def __init__(self):
-        self.rules: List[Tuple[str, Callable[[Any], bool], str]] = []
+        self._registry: Dict[str, List[Callable]] = {}
 
-    def schema(self, field: str, predicate: Callable[[Any], bool], msg: str):
-        self.rules.append((field, predicate, msg))
-        return self
+    def register(self, field: str, check: Callable[[Any], bool]) -> None:
+        if field not in self._registry:
+            self._registry[field] = []
+        self._registry[field].append(check)
 
-    def __call__(self, stream: Iterable[Dict[str, Any]]) -> Generator[Dict[str, Any], None, List[Dict[str, Any]]]:
-        rejected = []
-        for index, record in enumerate(stream):
-            if not isinstance(record, dict):
-                rejected.append({"index": index, "raw": record, "errors": ["Record is not a dict"]})
-                continue
+    def sanitize(self, data: Dict[str, Any]) -> bool:
+        for key, value in data.items():
+            validators = self._registry.get(key, [])
+            if not all(func(value) for func in validators):
+                return False
+        return True
 
-            errors = [
-                msg for field, pred, msg in self.rules
-                if field not in record or not pred(record[field])
-            ]
+    @staticmethod
+    def non_empty(val: Any) -> bool:
+        return bool(val) and len(str(val).strip()) > 0
 
-            if errors:
-                rejected.append({"index": index, "raw": record, "errors": errors})
-            else:
-                yield record
+    @staticmethod
+    def bounds(min_val: int, max_val: int) -> Callable:
+        return lambda x: isinstance(x, (int, float)) and min_val <= x <= max_val
 
-        return rejected
+def execute_processing(data_stream: List[Dict[str, Any]]) -> None:
+    guardian = InputGuardian()
+    guardian.register("id", lambda x: isinstance(x, int))
+    guardian.register("payload", InputGuardian.non_empty)
+    guardian.register("level", InputGuardian.bounds(1, 10))
 
-
-def validate_processing_loop(batch: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Runs batch processing loop with stream assertion validation."""
-    validator = (
-        StreamValidator()
-        .schema("id", lambda v: isinstance(v, int) and v > 0, "ID must be positive int")
-        .schema("tag", lambda v: isinstance(v, str) and v.isalnum(), "Tag must be alphanumeric")
-        .schema("data", lambda v: v is not None, "Data payload cannot be None")
-    )
-
-    generator = validator(batch)
-    valid_items = []
-
-    while True:
-        try:
-            item = next(generator)
-            item["_validated"] = True
-            valid_items.append(item)
-        except StopIteration as err:
-            quarantine = err.value or []
-            break
-
-    return valid_items, quarantine
+    for entry in data_stream:
+        if guardian.sanitize(entry):
+            print(f"Processing secure item: {entry.get('id')}")
+        else:
+            print(f"Dropped invalid entry: {entry}")
