@@ -1,45 +1,37 @@
-import inspect
-from typing import Callable, Any, List
+from typing import Any, Callable, Mapping, Sequence
 
 class Flow:
-    """A creative pipelines helper allowing functional chaining via operators."""
-    def __init__(self, value: Any = None):
-        self._value = value
-        self._steps: List[Callable] = []
+    """Pipeline processor leveraging the bitwise OR operator for execution flow."""
+    def __init__(self, value: Any):
+        self.value = value
 
-    def __or__(self, other: Callable[[Any], Any]) -> 'Flow':
-        if not callable(other):
-            raise TypeError("Flow step must be a callable.")
-        new_flow = Flow(self._value)
-        new_flow._steps = self._steps + [other]
-        return new_flow
+    def __or__(self, func: Callable[[Any], Any]) -> "Flow":
+        return Flow(func(self.value))
 
-    def __rshift__(self, other: Any) -> Any:
-        """Evaluates the pipeline with the provided initial input."""
-        val = other if self._value is None else self._value
-        for step in self._steps:
-            sig = inspect.signature(step)
-            params = list(sig.parameters.values())
-            if len(params) == 0:
-                val = step()
+    def __repr__(self) -> str:
+        return f"Flow({self.value!r})"
+
+
+class PathFinder:
+    """Safe retrieval of deep-nested structure elements via string-based paths."""
+    def __init__(self, target: Any, separator: str = "."):
+        self.target = target
+        self.separator = separator
+
+    def resolve(self, path: str, fallback: Any = None) -> Any:
+        keys = path.split(self.separator)
+        current = self.target
+        for key in keys:
+            if isinstance(current, Mapping) and key in current:
+                current = current[key]
+            elif isinstance(current, Sequence) and not isinstance(current, (str, bytes)) and key.isdigit():
+                idx = int(key)
+                current = current[idx] if 0 <= idx < len(current) else fallback
             else:
-                val = step(val)
-        return val
+                return fallback
+        return current
 
-    def execute(self) -> Any:
-        return self >> self._value
 
-def safeguard(default_value: Any):
-    """Decorator helper to wrap functions in a try-except returning default."""
-    def decorator(func: Callable):
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception:
-                return default_value
-        return wrapper
-    return decorator
-
-to_upper = safeguard("")(lambda s: str(s).upper())
-to_words = safeguard([])(lambda s: str(s).split())
-slugify = safeguard("")(lambda s: "-".join(str(s).lower().split()))
+def coalesce(*args: Any) -> Any:
+    """Returns the first non-None argument encountered."""
+    return next((x for x in args if x is not None), None)
