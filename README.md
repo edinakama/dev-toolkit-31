@@ -1,46 +1,50 @@
 # dev-toolkit-31
 
-A high-performance Python utility suite designed to streamline common developer workflows and system automation tasks. This toolkit minimizes boilerplate code, allowing you to focus on shipping robust software faster.
+`dev-toolkit-31` is a robust Python utility suite designed to streamline routine development tasks and automate common command-line operations. It provides a centralized hub for environment management, file processing, and local server orchestration to boost developer productivity.
 
-## Features
+### Key Features
 
-*   **Config Manager:** Rapidly initialize, validate, and parse YAML/JSON configuration files with type hinting.
-*   **LogStreamer:** A thread-safe logging interface that formats structured output for terminal and file-based debugging simultaneously.
-*   **EnvSync:** An automated environment validator that verifies system dependencies and secret availability before application startup.
-*   **TaskBatcher:** A lightweight decorator-based wrapper for executing asynchronous batch processes with configurable retry logic.
+*   **Project Scaffolding:** Rapidly generate standardized directory structures and boilerplate configurations for new Python projects.
+*   **Environment Sync:** Effortlessly synchronize environment variables and dependency files across local and staging configurations.
+*   **Log Analytics:** An embedded lightweight parser to filter, search, and aggregate data from application logs in real-time.
+*   **Task Runner:** A streamlined wrapper to manage concurrent execution of linters, formatters, and test suites with custom task definitions.
 
-## Installation
+### Installation
 
-Ensure you have Python 3.9+ installed. You can install the toolkit directly via pip:
-
-```bash
-pip install dev-toolkit-31
-```
-
-For development installations, clone the repository and use poetry:
+Requires Python 3.9 or higher. Install the toolkit globally or within your virtual environment:
 
 ```bash
+# Clone the repository
 git clone https://github.com/Developer/dev-toolkit-31.git
 cd dev-toolkit-31
-poetry install
+
+# Install requirements
+pip install -r requirements.txt
+
+# Install as a package
+pip install .
 ```
 
-## Usage
+### Usage
 
-Integrating `dev-toolkit-31` into your project is seamless. Here is an example of initializing the `ConfigManager` to load project settings:
+Once installed, you can trigger specific toolkit modules via the `dtk` command.
 
-```python
-from dev_toolkit.config import ConfigManager
-
-# Load and validate settings
-config = ConfigManager(file_path="settings.yaml")
-
-if config.is_valid():
-    db_uri = config.get("database_uri")
-    print(f"Connected to: {db_uri}")
+**Running a project build:**
+```bash
+dtk scaffold --name my-new-app --template fastapi
 ```
 
-## License
+**Parsing logs from a file:**
+```bash
+dtk logs parse ./app.log --level ERROR --output report.json
+```
+
+For a full list of commands and available flags, run:
+```bash
+dtk --help
+```
+
+### License
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
