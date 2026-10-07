@@ -1,37 +1,32 @@
-from typing import Any, Callable, Mapping, Sequence
+import json
+import os
+from typing import Any, Dict
 
-class Flow:
-    """Pipeline processor leveraging the bitwise OR operator for execution flow."""
-    def __init__(self, value: Any):
-        self.value = value
+class ConfigLoader:
+    """A whimsical yet functional configuration injector."""
+    def __init__(self, defaults: Dict[str, Any]):
+        self.config = defaults
 
-    def __or__(self, func: Callable[[Any], Any]) -> "Flow":
-        return Flow(func(self.value))
+    def __call__(self, file_path: str) -> Dict[str, Any]:
+        if not os.path.exists(file_path):
+            return self.config
+        
+        try:
+            with open(file_path, 'r') as f:
+                loaded = json.load(f)
+                # Recursive merge strategy: the dict union operator for deep overrides
+                return {**self.config, **loaded}
+        except (json.JSONDecodeError, IOError):
+            return self.config
 
-    def __repr__(self) -> str:
-        return f"Flow({self.value!r})"
+    def environment_override(self, prefix: str = 'APP_') -> None:
+        """Inject environment variables into current state."""
+        for key in self.config.keys():
+            env_key = f"{prefix}{key.upper()}"
+            if env_key in os.environ:
+                self.config[key] = os.environ[env_key]
 
-
-class PathFinder:
-    """Safe retrieval of deep-nested structure elements via string-based paths."""
-    def __init__(self, target: Any, separator: str = "."):
-        self.target = target
-        self.separator = separator
-
-    def resolve(self, path: str, fallback: Any = None) -> Any:
-        keys = path.split(self.separator)
-        current = self.target
-        for key in keys:
-            if isinstance(current, Mapping) and key in current:
-                current = current[key]
-            elif isinstance(current, Sequence) and not isinstance(current, (str, bytes)) and key.isdigit():
-                idx = int(key)
-                current = current[idx] if 0 <= idx < len(current) else fallback
-            else:
-                return fallback
-        return current
-
-
-def coalesce(*args: Any) -> Any:
-    """Returns the first non-None argument encountered."""
-    return next((x for x in args if x is not None), None)
+# Usage example:
+# loader = ConfigLoader({'port': 8080, 'debug': False})
+# current_config = loader('config.json')
+# loader.environment_override()
