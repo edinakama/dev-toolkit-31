@@ -1,44 +1,40 @@
-import functools
-from typing import Any, Union, Callable
+import json
+import time
+from typing import Any, Callable, Dict
 
-class FunkyPath:
-    """A wrapper for nested dicts/lists that uses the division operator `/` for safe path traversal."""
-    def __init__(self, data: Any):
-        self._data = data
-
-    def __truediv__(self, key: Union[str, int]) -> 'FunkyPath':
-        if isinstance(self._data, dict):
-            return FunkyPath(self._data.get(key, {}))
-        elif isinstance(self._data, (list, tuple)) and isinstance(key, int):
-            try:
-                return FunkyPath(self._data[key])
-            except IndexError:
-                return FunkyPath(None)
-        return FunkyPath(None)
-
-    def __call__(self, default: Any = None) -> Any:
-        """Unwraps the value, returning default if nothing is found."""
-        if self._data == {}:
-            return default
-        return self._data if self._data is not None else default
-
-    def __repr__(self) -> str:
-        return f"FunkyPath({self._data!r})"
-
-
-def retry_on_fallback(fallback_value: Any, exceptions: tuple = (Exception,)):
-    """Decorator that returns a fallback value if decorated function raises specified exceptions."""
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except exceptions:
-                return fallback_value
+def retry_execution(retries: int = 3, delay: float = 0.5) -> Callable:
+    def decorator(func: Callable) -> Callable:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_ex = None
+            for _ in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay)
+            raise last_ex
         return wrapper
     return decorator
 
-def batch_process(iterable: list, size: int):
-    """Yields successive batches of a list with a simple slice-based iterator."""
-    for i in range(0, len(iterable), size):
-        yield iterable[i:i + size]
+def safe_json_load(data: str, default: Dict[str, Any] = None) -> Dict[str, Any]:
+    try:
+        return json.loads(data)
+    except (ValueError, TypeError):
+        return default or {}
+
+def deep_flatten(nested: list) -> list:
+    result = []
+    for item in nested:
+        if isinstance(item, list):
+            result.extend(deep_flatten(item))
+        else:
+            result.append(item)
+    return result
+
+def time_execution(func: Callable) -> Callable:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        print(f"execution took {time.perf_counter() - start:.4f}s")
+        return result
+    return wrapper
