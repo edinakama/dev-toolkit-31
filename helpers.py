@@ -1,40 +1,37 @@
-import json
+import functools
 import time
-from typing import Any, Callable, Dict
 
-def retry_execution(retries: int = 3, delay: float = 0.5) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_ex = None
-            for _ in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay)
-            raise last_ex
+class MemoizeDict:
+    """A dictionary-based cache with TTL functionality."""
+    def __init__(self, ttl_seconds=60):
+        self.cache = {}
+        self.ttl = ttl_seconds
+
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (args, frozenset(kwargs.items()))
+            now = time.time()
+            if key in self.cache:
+                result, timestamp = self.cache[key]
+                if now - timestamp < self.ttl:
+                    return result
+            result = func(*args, **kwargs)
+            self.cache[key] = (result, now)
+            return result
         return wrapper
-    return decorator
 
-def safe_json_load(data: str, default: Dict[str, Any] = None) -> Dict[str, Any]:
-    try:
-        return json.loads(data)
-    except (ValueError, TypeError):
-        return default or {}
+@MemoizeDict(ttl_seconds=300)
+def compute_intensive_data(payload: str) -> str:
+    """Simulates heavy computation with lazy memoization."""
+    time.sleep(2)
+    return f"processed_{payload.upper()}"
 
-def deep_flatten(nested: list) -> list:
-    result = []
-    for item in nested:
-        if isinstance(item, list):
-            result.extend(deep_flatten(item))
-        else:
-            result.append(item)
-    return result
+def batch_process(items, func):
+    """Generator-based batch processing for memory efficiency."""
+    for item in items:
+        yield func(item)
 
-def time_execution(func: Callable) -> Callable:
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        print(f"execution took {time.perf_counter() - start:.4f}s")
-        return result
-    return wrapper
+def parallel_registry():
+    """Namespace container for performance-critical constants."""
+    return {"threshold": 1024, "buffer_size": 4096}
