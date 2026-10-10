@@ -1,34 +1,37 @@
-import sys
-import time
-import inspect
-from datetime import datetime
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
-def log_dispatch(level, message):
-    caller = inspect.stack()[2]
-    context = f"{caller.filename.split('/')[-1]}:{caller.lineno}"
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    output = f"[{timestamp}] [{level.upper()}] ({context}) -> {message}"
-    sys.stdout.write(f"{output}\n")
-    sys.stdout.flush()
+def get_dev_logger(name: str = 'dev-toolkit-31', log_file: str = 'app.log') -> logging.Logger:
+    path = Path(log_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-class CreativeLogger:
-    def __init__(self, prefix="dev-toolkit-31"):
-        self.prefix = prefix
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
 
-    def info(self, msg):
-        log_dispatch("info", f"{self.prefix} | {msg}")
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '[%(asctime)s] %(levelname)-8s | %(name)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
-    def warn(self, msg):
-        log_dispatch("warn", f"{self.prefix} | !!! {msg} !!!")
+        # Creative rotating handler with specific limits
+        handler = RotatingFileHandler(
+            path,
+            maxBytes=1024 * 1024 * 5,
+            backupCount=3,
+            encoding='utf-8'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-    def error(self, msg):
-        log_dispatch("crit", f"{self.prefix} | >>> {msg.upper()} <<<")
+        # Console stream as secondary auditor
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
-    def stopwatch(func):
-        def wrapper(*args, **kwargs):
-            start = time.perf_counter()
-            result = func(*args, **kwargs)
-            elapsed = time.perf_counter() - start
-            log_dispatch("perf", f"function {func.__name__} took {elapsed:.4f}s")
-            return result
-        return wrapper
+    return logger
+
+if __name__ == '__main__':
+    log = get_dev_logger()
+    log.info('toolkit initialized with rotation logic')
