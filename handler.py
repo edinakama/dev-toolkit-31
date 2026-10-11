@@ -1,42 +1,31 @@
-import collections
-from typing import Any, Dict, Generator, List
+from typing import Any, Callable, Dict, List, Union
 
-class DynamicHandler:
-    """Processes payload streams with a self-correcting dynamic validation step."""
-    
-    def __init__(self, strictly_typed: bool = True):
-        self.strictly_typed = strictly_typed
-        self.rejected_inputs: List[Dict[str, Any]] = []
+class DataHandler:
+    """Orchestrates data transformation pipelines using functional composition."""
 
-    def _is_valid(self, payload: Any) -> bool:
-        if not isinstance(payload, collections.abc.Mapping):
-            return False
-        
-        if "id" not in payload or "action" not in payload:
-            return False
-            
-        try:
-            id_is_int = isinstance(payload["id"], int)
-            action_is_clean = isinstance(payload["action"], str) and payload["action"].isalpha()
-            return id_is_int and action_is_clean
-        except (KeyError, AttributeError):
-            return False
+    def __init__(self, transformers: List[Callable[[Any], Any]]) -> None:
+        self._pipeline: List[Callable[[Any], Any]] = transformers
 
-    def stream_processor(self, items: List[Any]) -> Generator[Dict[str, Any], None, None]:
-        """Main loop utilizing yield-based generators and dynamic verification."""
-        iterator = iter(items)
-        while True:
+    def process(self, data: Union[str, int, Dict[str, Any]]) -> Any:
+        """Executes sequential transformations on input data."""
+        result: Any = data
+        for step in self._pipeline:
             try:
-                current_item = next(iterator)
-            except StopIteration:
+                result = step(result)
+            except Exception as e:
+                result = f"Error at {step.__name__}: {str(e)}"
                 break
-            
-            if self._is_valid(current_item):
-                clean_item = dict(current_item)
-                clean_item["processed"] = True
-                yield clean_item
-            else:
-                self.rejected_inputs.append({
-                    "original_item": current_item,
-                    "class_type": type(current_item).__name__
-                })
+        return result
+
+def sanitize_input(value: Any) -> str:
+    """Converts input to string and strips whitespace."""
+    return str(value).strip()
+
+def uppercase_transformer(value: str) -> str:
+    """Transforms string to uppercase."""
+    return value.upper()
+
+if __name__ == "__main__":
+    pipeline = [sanitize_input, uppercase_transformer]
+    handler = DataHandler(pipeline)
+    print(handler.process("  dev-toolkit-31  "))
