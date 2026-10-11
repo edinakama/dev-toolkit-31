@@ -1,31 +1,40 @@
-from typing import Any, Callable, Dict, List, Union
+import logging
+from typing import Any, Dict, Callable
 
 class DataHandler:
-    """Orchestrates data transformation pipelines using functional composition."""
+    def __init__(self, registry: Dict[str, Callable] = None):
+        self._registry = registry or {}
+        self._logger = logging.getLogger('dev-toolkit-31')
 
-    def __init__(self, transformers: List[Callable[[Any], Any]]) -> None:
-        self._pipeline: List[Callable[[Any], Any]] = transformers
+    def register(self, key: str) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            self._registry[key] = func
+            return func
+        return decorator
 
-    def process(self, data: Union[str, int, Dict[str, Any]]) -> Any:
-        """Executes sequential transformations on input data."""
-        result: Any = data
-        for step in self._pipeline:
-            try:
-                result = step(result)
-            except Exception as e:
-                result = f"Error at {step.__name__}: {str(e)}"
-                break
-        return result
+    def process(self, payload: Dict[str, Any]) -> Any:
+        key = payload.get('type')
+        handler = self._registry.get(key)
+        
+        if not handler:
+            self._logger.warning(f'no handler found for type: {key}')
+            return None
+            
+        try:
+            return handler(payload.get('data'))
+        except Exception as e:
+            self._logger.error(f'execution failure: {e}')
+            return {'error': str(e)}
 
-def sanitize_input(value: Any) -> str:
-    """Converts input to string and strips whitespace."""
-    return str(value).strip()
+def initialize_pipeline() -> DataHandler:
+    handler = DataHandler()
+    
+    @handler.register('compute')
+    def compute_data(data: Any) -> Any:
+        return sum(data) if isinstance(data, list) else None
 
-def uppercase_transformer(value: str) -> str:
-    """Transforms string to uppercase."""
-    return value.upper()
-
-if __name__ == "__main__":
-    pipeline = [sanitize_input, uppercase_transformer]
-    handler = DataHandler(pipeline)
-    print(handler.process("  dev-toolkit-31  "))
+    @handler.register('echo')
+    def echo_data(data: Any) -> Any:
+        return data
+        
+    return handler
