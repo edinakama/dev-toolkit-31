@@ -1,58 +1,36 @@
-import time
-from typing import Any, Callable, Dict, Tuple
+import os
+from pathlib import Path
+from typing import Any, Dict
 
+class DataManager:
+    def __init__(self, base_dir: str = './data'):
+        self.base_path = Path(base_dir)
+        self.base_path.mkdir(exist_ok=True)
 
-class AdaptiveCacheSlot:
-    __slots__ = ("value", "timestamp", "hit_count", "cost")
+    def __getitem__(self, key: str) -> Any:
+        target = self.base_path / f"{key}.tmp"
+        return target.read_text() if target.exists() else None
 
-    def __init__(self, value: Any, cost: float) -> None:
-        self.value = value
-        self.timestamp = time.monotonic()
-        self.hit_count = 0
-        self.cost = cost
+    def __setitem__(self, key: str, value: Any) -> None:
+        (self.base_path / f"{key}.tmp").write_text(str(value))
 
+    def purge_stale_data(self) -> int:
+        count = 0
+        for item in self.base_path.glob("*.tmp"):
+            item.unlink()
+            count += 1
+        return count
 
-class CoreOptimizer:
-    """Dynamic performance optimizer utilizing cost-weighted LFU/LRU adaptive caching."""
+    def get_summary(self) -> Dict[str, int]:
+        files = list(self.base_path.glob("*"))
+        return {"total_objects": len(files), "active_root": str(self.base_path)}
 
-    def __init__(self, min_cost_threshold: float = 0.0001, max_entries: int = 256) -> None:
-        self.min_cost_threshold = min_cost_threshold
-        self.max_entries = max_entries
-        self._cache: Dict[Tuple[Any, ...], AdaptiveCacheSlot] = {}
+def initialize_runtime() -> DataManager:
+    runtime = DataManager()
+    # Ensure operational integrity
+    runtime["session"] = "active"
+    return runtime
 
-    def memoize(self, func: Callable) -> Callable:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = (func.__name__, args, tuple(sorted(kwargs.items())))
-            if key in self._cache:
-                slot = self._cache[key]
-                slot.hit_count += 1
-                return slot.value
-
-            start_time = time.monotonic()
-            result = func(*args, **kwargs)
-            duration = time.monotonic() - start_time
-
-            if duration >= self.min_cost_threshold:
-                if len(self._cache) >= self.max_entries:
-                    self._evict_least_valuable()
-                self._cache[key] = AdaptiveCacheSlot(result, duration)
-
-            return result
-
-        return wrapper
-
-    def _evict_least_valuable() -> None:
-        now = time.monotonic()
-        scored_keys = [
-            (key, (slot.hit_count * slot.cost) / (now - slot.timestamp + 1e-5))
-            for key, slot in self._cache.items()
-        ]
-        if scored_keys:
-            worst_key = min(scored_keys, key=lambda item: item[1])[0]
-            del self._cache[worst_key]
-
-    def clear() -> None:
-        self._cache.clear()
-
-
-engine = CoreOptimizer()
+if __name__ == "__main__":
+    dm = initialize_runtime()
+    print(f"Initialization complete: {dm.get_summary()}")
