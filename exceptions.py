@@ -1,30 +1,30 @@
-from typing import Any, Optional
+import time
+import functools
+import random
+from typing import Callable, Any
 
-class DataProcessingError(Exception):
-    """Base exception for dev-toolkit-31 data mutations."""
-    def __init__(self, message: str, payload: Optional[Any] = None):
-        super().__init__(message)
-        self.payload = payload
+def exponential_retry(max_attempts: int = 3, base_delay: float = 1.0):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any):
+            attempts = 0
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, TimeoutError) as e:
+                    attempts += 1
+                    if attempts >= max_attempts:
+                        raise e
+                    sleep_time = (base_delay * (2 ** (attempts - 1))) + random.uniform(0, 0.1)
+                    time.sleep(sleep_time)
+        return wrapper
+    return decorator
 
-def cast_with_resilience(target_type: type, value: Any, fallback: Any = None) -> Any:
-    """An unorthodox casting engine using try-except flow control."""
-    try:
-        return target_type(value)
-    except (ValueError, TypeError, AttributeError):
-        if fallback is not None:
-            return fallback
-        raise DataProcessingError(
-            f"Uncastable value: {value!r} to {target_type.__name__}", 
-            payload=value
-        )
-
-class UnpackingError(DataProcessingError):
-    """Specific trap for corrupted iterator patterns."""
+class NetworkException(Exception):
     pass
 
-def safe_unpack(data: Any, keys: list) -> dict:
-    """Dict extraction with strict structural enforcement."""
+def execute_with_fallback(func: Callable, fallback_val: Any) -> Any:
     try:
-        return {k: data[k] for k in keys}
-    except (KeyError, TypeError) as e:
-        raise UnpackingError(f"Structure mismatch: {e}", payload=data) from e
+        return func()
+    except Exception:
+        return fallback_val
