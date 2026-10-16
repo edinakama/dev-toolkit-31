@@ -1,40 +1,38 @@
-import logging
-from typing import Any, Dict, Callable
+import functools
+from typing import Any, Callable, Dict, List, Union
 
-class DataHandler:
-    def __init__(self, registry: Dict[str, Callable] = None):
-        self._registry = registry or {}
-        self._logger = logging.getLogger('dev-toolkit-31')
-
-    def register(self, key: str) -> Callable:
-        def decorator(func: Callable) -> Callable:
-            self._registry[key] = func
-            return func
-        return decorator
-
-    def process(self, payload: Dict[str, Any]) -> Any:
-        key = payload.get('type')
-        handler = self._registry.get(key)
-        
-        if not handler:
-            self._logger.warning(f'no handler found for type: {key}')
-            return None
-            
-        try:
-            return handler(payload.get('data'))
-        except Exception as e:
-            self._logger.error(f'execution failure: {e}')
-            return {'error': str(e)}
-
-def initialize_pipeline() -> DataHandler:
-    handler = DataHandler()
+def cast_structure(data: Any, schema: Dict[type, Callable]) -> Any:
+    """recursive transformation of data structures using type mappings"""
+    if isinstance(data, dict):
+        return {k: cast_structure(v, schema) for k, v in data.items()}
+    if isinstance(data, list):
+        return [cast_structure(i, schema) for i in data]
     
-    @handler.register('compute')
-    def compute_data(data: Any) -> Any:
-        return sum(data) if isinstance(data, list) else None
+    for target_type, transform in schema.items():
+        if isinstance(data, target_type):
+            return transform(data)
+    return data
 
-    @handler.register('echo')
-    def echo_data(data: Any) -> Any:
-        return data
-        
-    return handler
+class DataPipe:
+    """functional pipeline pattern for object manipulation"""
+    def __init__(self, value: Any):
+        self._value = value
+
+    def apply(self, func: Callable[[Any], Any]) -> 'DataPipe':
+        self._value = func(self._value)
+        return self
+
+    def result(self) -> Any:
+        return self._value
+
+def compose_handlers(*funcs: Callable) -> Callable:
+    """function composition for cleaner pipeline initialization"""
+    return functools.reduce(lambda f, g: lambda x: g(f(x)), funcs)
+
+def sanitize_payload(data: Union[dict, list]) -> Union[dict, list]:
+    """stripping of null values from complex structures"""
+    if isinstance(data, dict):
+        return {k: sanitize_payload(v) for k, v in data.items() if v is not None}
+    if isinstance(data, list):
+        return [sanitize_payload(i) for i in data if i is not None]
+    return data
