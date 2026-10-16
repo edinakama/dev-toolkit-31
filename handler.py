@@ -1,32 +1,56 @@
-import sys
-import traceback
-import logging
+from typing import Any, Callable, Generator, List, Dict
 
-class OperationalFault(Exception):
-    pass
 
-def robust_execution(func):
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except (ValueError, TypeError, ZeroDivisionError) as e:
-            logging.error(f'Edge case caught: {type(e).__name__} -> {e}')
-            return None
-        except Exception as e:
-            logging.critical(f'Unexpected systemic failure: {traceback.format_exc()}')
-            raise OperationalFault('System state compromised') from e
-    return wrapper
+class Constraint:
+    def __init__(self, check: Callable[[Any], bool], msg: str):
+        self.check = check
+        self.msg = msg
 
-@robust_execution
-def process_data(payload):
-    if not isinstance(payload, dict):
-        raise TypeError('Input must be a dictionary')
-    return {k: v * 2 for k, v in payload.items()}
+    def __or__(self, other: "Constraint") -> "Constraint":
+        return Constraint(
+            lambda x: self.check(x) or other.check(x),
+            f"({self.msg} OR {other.msg})"
+        )
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    data = {'val': 10, 'empty': 0}
-    result = process_data(data)
-    print(f'Processed: {result}')
-    failure = process_data('invalid_type')
-    print(f'Safe return on failure: {failure}')
+    def __and__(self, other: "Constraint") -> "Constraint":
+        return Constraint(
+            lambda x: self.check(x) and other.check(x),
+            f"({self.msg} AND {other.msg})"
+        )
+
+
+def validate_and_process(stream: List[Any]) -> Generator[Dict[str, Any], None, None]:
+    is_str = Constraint(lambda x: isinstance(x, str), "must be string")
+    is_num = Constraint(lambda x: isinstance(x, (int, float)), "must be number")
+    is_positive = Constraint(lambda x: isinstance(x, (int, float)) and x > 0, "must be positive")
+    not_empty = Constraint(lambda x: len(str(x).strip()) > 0, "cannot be blank")
+
+    valid_payload = (is_str & not_empty) | (is_num & is_positive)
+
+    for idx, item in enumerate(stream):
+        if item is None or not valid_payload.check(item):
+            yield {
+                "status": "rejected",
+                "index": idx,
+                "input": item,
+                "reason": f"Failed constraint rule: {valid_payload.msg}"
+            }
+            continue
+
+        transformed = item.strip().upper() if isinstance(item, str) else item ** 2
+        yield {
+            "status": "processed",
+            "index": idx,
+            "input": item,
+            "result": transformed
+        }
+
+
+def run_pipeline(data: List[Any]) -> List[Dict[str, Any]]:
+    return list(validate_and_process(data))
+
+
+if __name__ == "__main__":
+    raw_inputs = ["  hello  ", -5, "", 4.5, None, "toolkit"]
+    output = run_pipeline(raw_inputs)
+    print(f"Processed {len(output)} items successfully.")
