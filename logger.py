@@ -1,37 +1,35 @@
-import logging
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
+import time
+import threading
+from collections import deque
 
-def get_dev_logger(name: str = 'dev-toolkit-31', log_file: str = 'app.log') -> logging.Logger:
-    path = Path(log_file)
-    path.parent.mkdir(parents=True, exist_ok=True)
+class AsyncBufferLogger:
+    def __init__(self, size=1024):
+        self._buffer = deque(maxlen=size)
+        self._lock = threading.Lock()
+        self._active = True
+        self._worker = threading.Thread(target=self._flush_loop, daemon=True)
+        self._worker.start()
 
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    def log(self, message):
+        self._buffer.append(f"[{time.time()}] {message}")
 
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '[%(asctime)s] %(levelname)-8s | %(name)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+    def _flush_loop(self):
+        while self._active:
+            if self._buffer:
+                batch = list(self._buffer)
+                self._buffer.clear()
+                self._write_to_disk(batch)
+            time.sleep(1)
 
-        # Creative rotating handler with specific limits
-        handler = RotatingFileHandler(
-            path,
-            maxBytes=1024 * 1024 * 5,
-            backupCount=3,
-            encoding='utf-8'
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+    def _write_to_disk(self, lines):
+        with open("dev-toolkit-31.log", "a") as f:
+            f.writelines(f"{line}\n" for line in lines)
 
-        # Console stream as secondary auditor
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        logger.addHandler(console)
+    def shutdown(self):
+        self._active = False
+        self._worker.join()
 
-    return logger
+instance = AsyncBufferLogger()
 
-if __name__ == '__main__':
-    log = get_dev_logger()
-    log.info('toolkit initialized with rotation logic')
+def log_event(message):
+    instance.log(message)
