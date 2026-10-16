@@ -1,46 +1,30 @@
-import time
-import functools
-import itertools
-from typing import Callable, Any, Iterable, List
+import json
+from pathlib import Path
+from typing import Any, Dict
 
-def retry(attempts: int = 3, delay: float = 0.5):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_ex = None
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay * (2 ** i))
-            raise last_ex
-        return wrapper
-    return decorator
+class ConfigLoader:
+    """dynamic configuration loader with recursive default injection"""
+    def __init__(self, defaults: Dict[str, Any]):
+        self._data = defaults
 
-def chunker(iterable: Iterable, size: int) -> Iterable[List[Any]]:
-    iterator = iter(iterable)
-    while True:
-        chunk = list(itertools.islice(iterator, size))
-        if not chunk:
-            break
-        yield chunk
+    def load(self, path: str) -> Dict[str, Any]:
+        file_path = Path(path)
+        if not file_path.exists():
+            return self._data
+        
+        with open(file_path, 'r') as f:
+            user_config = json.load(f)
+            return self._merge(self._data, user_config)
 
-def compose(*functions: Callable) -> Callable:
-    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
+    def _merge(self, base: Any, over: Any) -> Any:
+        if isinstance(base, dict) and isinstance(over, dict):
+            return {k: self._merge(base.get(k, {}), over.get(k, {})) 
+                    for k in set(base) | set(over)}
+        return over if over is not None else base
 
-def memoize_transient(ttl_seconds: int = 60):
-    cache = {}
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args):
-            now = time.time()
-            if args in cache:
-                val, ts = cache[args]
-                if now - ts < ttl_seconds:
-                    return val
-            result = func(*args)
-            cache[args] = (result, now)
-            return result
-        return wrapper
-    return decorator
+def get_config_handler(defaults: Dict[str, Any]) -> ConfigLoader:
+    return ConfigLoader(defaults)
+
+# Usage example:
+# loader = get_config_handler({'host': 'localhost', 'port': 8080})
+# config = loader.load('config.json')
