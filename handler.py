@@ -1,38 +1,32 @@
-import functools
-from typing import Any, Callable, Dict, List, Union
+import sys
+import traceback
+import logging
 
-def cast_structure(data: Any, schema: Dict[type, Callable]) -> Any:
-    """recursive transformation of data structures using type mappings"""
-    if isinstance(data, dict):
-        return {k: cast_structure(v, schema) for k, v in data.items()}
-    if isinstance(data, list):
-        return [cast_structure(i, schema) for i in data]
-    
-    for target_type, transform in schema.items():
-        if isinstance(data, target_type):
-            return transform(data)
-    return data
+class OperationalFault(Exception):
+    pass
 
-class DataPipe:
-    """functional pipeline pattern for object manipulation"""
-    def __init__(self, value: Any):
-        self._value = value
+def robust_execution(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (ValueError, TypeError, ZeroDivisionError) as e:
+            logging.error(f'Edge case caught: {type(e).__name__} -> {e}')
+            return None
+        except Exception as e:
+            logging.critical(f'Unexpected systemic failure: {traceback.format_exc()}')
+            raise OperationalFault('System state compromised') from e
+    return wrapper
 
-    def apply(self, func: Callable[[Any], Any]) -> 'DataPipe':
-        self._value = func(self._value)
-        return self
+@robust_execution
+def process_data(payload):
+    if not isinstance(payload, dict):
+        raise TypeError('Input must be a dictionary')
+    return {k: v * 2 for k, v in payload.items()}
 
-    def result(self) -> Any:
-        return self._value
-
-def compose_handlers(*funcs: Callable) -> Callable:
-    """function composition for cleaner pipeline initialization"""
-    return functools.reduce(lambda f, g: lambda x: g(f(x)), funcs)
-
-def sanitize_payload(data: Union[dict, list]) -> Union[dict, list]:
-    """stripping of null values from complex structures"""
-    if isinstance(data, dict):
-        return {k: sanitize_payload(v) for k, v in data.items() if v is not None}
-    if isinstance(data, list):
-        return [sanitize_payload(i) for i in data if i is not None]
-    return data
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    data = {'val': 10, 'empty': 0}
+    result = process_data(data)
+    print(f'Processed: {result}')
+    failure = process_data('invalid_type')
+    print(f'Safe return on failure: {failure}')
