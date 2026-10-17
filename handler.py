@@ -1,56 +1,57 @@
-from typing import Any, Callable, Generator, List, Dict
+import math
+import sys
+from typing import Any, Callable, Union
 
 
-class Constraint:
-    def __init__(self, check: Callable[[Any], bool], msg: str):
-        self.check = check
-        self.msg = msg
+class EdgeGuard:
+    """Creative decorator wrapper for swallowing and normalizing extreme edge cases."""
 
-    def __or__(self, other: "Constraint") -> "Constraint":
-        return Constraint(
-            lambda x: self.check(x) or other.check(x),
-            f"({self.msg} OR {other.msg})"
-        )
+    def __init__(self, fallback: Any = None, coerce_types: bool = True):
+        self.fallback = fallback
+        self.coerce_types = coerce_types
 
-    def __and__(self, other: "Constraint") -> "Constraint":
-        return Constraint(
-            lambda x: self.check(x) and other.check(x),
-            f"({self.msg} AND {other.msg})"
-        )
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            sanitized_args = tuple(self._sanitize(a) for a in args)
+            sanitized_kwargs = {k: self._sanitize(v) for k, v in kwargs.items()}
+            try:
+                res = func(*sanitized_args, **sanitized_kwargs)
+                return self._sanitize(res)
+            except (ValueError, TypeError, ZeroDivisionError, OverflowError) as err:
+                return self._salvage(func, err, *sanitized_args, **sanitized_kwargs)
 
+        return wrapper
 
-def validate_and_process(stream: List[Any]) -> Generator[Dict[str, Any], None, None]:
-    is_str = Constraint(lambda x: isinstance(x, str), "must be string")
-    is_num = Constraint(lambda x: isinstance(x, (int, float)), "must be number")
-    is_positive = Constraint(lambda x: isinstance(x, (int, float)) and x > 0, "must be positive")
-    not_empty = Constraint(lambda x: len(str(x).strip()) > 0, "cannot be blank")
+    def _sanitize(self, val: Any) -> Any:
+        if isinstance(val, float):
+            if math.isnan(val):
+                return 0.0
+            if math.isinf(val):
+                return sys.float_info.max if val > 0 else -sys.float_info.max
+        elif isinstance(val, (bytes, bytearray)):
+            return val.decode("utf-8", errors="replace")
+        elif isinstance(val, (list, tuple)) and len(val) == 0:
+            return self.fallback if self.fallback is not None else val
+        return val
 
-    valid_payload = (is_str & not_empty) | (is_num & is_positive)
-
-    for idx, item in enumerate(stream):
-        if item is None or not valid_payload.check(item):
-            yield {
-                "status": "rejected",
-                "index": idx,
-                "input": item,
-                "reason": f"Failed constraint rule: {valid_payload.msg}"
-            }
-            continue
-
-        transformed = item.strip().upper() if isinstance(item, str) else item ** 2
-        yield {
-            "status": "processed",
-            "index": idx,
-            "input": item,
-            "result": transformed
-        }
-
-
-def run_pipeline(data: List[Any]) -> List[Dict[str, Any]]:
-    return list(validate_and_process(data))
+    def _salvage(
+        self, func: Callable[..., Any], err: Exception, *args: Any, **kwargs: Any
+    ) -> Any:
+        if isinstance(err, ZeroDivisionError):
+            return self.fallback if self.fallback is not None else float("inf")
+        if isinstance(err, OverflowError):
+            return sys.maxsize
+        if isinstance(err, (TypeError, ValueError)) and self.coerce_types:
+            try:
+                str_args = tuple(str(a) for a in args)
+                return func(*str_args, **kwargs)
+            except Exception:
+                pass
+        return self.fallback
 
 
-if __name__ == "__main__":
-    raw_inputs = ["  hello  ", -5, "", 4.5, None, "toolkit"]
-    output = run_pipeline(raw_inputs)
-    print(f"Processed {len(output)} items successfully.")
+@EdgeGuard(fallback="[SAFE_FALLBACK]")
+def safe_divide_and_format(a: Union[int, float, str], b: Union[int, float, str]) -> str:
+    num_a, num_b = float(a), float(b)
+    res = num_a / num_b
+    return f"Result: {res:.2f}"
