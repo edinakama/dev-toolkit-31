@@ -1,51 +1,31 @@
-import logging
-from typing import Any, Generator, Dict, Type
+from typing import List, Callable, Any, TypeVar, Union
 
-logger = logging.getLogger("dev-toolkit-31")
+T = TypeVar('T')
 
-class ProcessingError(ValueError):
-    """Custom exception raised when payload validation fails."""
-    pass
+class DataStreamProcessor:
+    """A whimsical pipeline processor for iterable data streams."""
 
-class StreamProcessor:
-    """
-    Processes a stream of raw payloads with runtime type coercion and validation.
-    """
-    def __init__(self, schema: Dict[str, Type]):
-        self.schema = schema
+    def __init__(self, transforms: List[Callable[[Any], Any]] = None) -> None:
+        """Initialize the processor with a chain of transformation callables."""
+        self._pipeline: List[Callable[[Any], Any]] = transforms or []
 
-    def validate_record(self, record: Any) -> Dict[str, Any]:
-        if not isinstance(record, dict):
-            raise ProcessingError(f"Expected dict input, got {type(record).__name__}")
-        
-        validated = {}
-        for field, expected_type in self.schema.items():
-            if field not in record:
-                raise ProcessingError(f"Missing required field: '{field}'")
-            
-            value = record[field]
-            if not isinstance(value, expected_type):
-                try:
-                    validated[field] = expected_type(value)
-                except (ValueError, TypeError) as err:
-                    raise ProcessingError(
-                        f"Field '{field}' cannot be coerced to {expected_type.__name__}"
-                    ) from err
-            else:
-                validated[field] = value
-        return validated
+    def add_step(self, func: Callable[[T], T]) -> None:
+        """Append a new functional step to the processing pipeline."""
+        self._pipeline.append(func)
 
-    def execute(self, data_stream: Generator[Dict[str, Any], None, None]) -> Generator[Dict[str, Any], None, None]:
-        """
-        Main processing loop enforcing structural checks on incoming streaming data.
-        """
-        for item in data_stream:
-            try:
-                if not item:
-                    continue
-                processed = self.validate_record(item)
-                processed["_status"] = "verified"
-                yield processed
-            except ProcessingError as err:
-                logger.warning(f"Skipping invalid item: {err}")
-                yield {"_status": "rejected", "raw": item, "error": str(err)}
+    def process(self, data: List[Any]) -> List[Any]:
+        """Apply the pipeline to each item in the data sequence."""
+        return [self._apply_chain(item) for item in data]
+
+    def _apply_chain(self, item: Any) -> Any:
+        """Execute the chain of functions in a fold-like sequence."""
+        result = item
+        for step in self._pipeline:
+            result = step(result)
+        return result
+
+if __name__ == '__main__':
+    # Example usage with a quirky transformation chain
+    processor = DataStreamProcessor(transforms=[lambda x: x * 2, lambda x: str(x) + "!"])
+    data_points: List[int] = [1, 2, 3]
+    print(processor.process(data_points))
