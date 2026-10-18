@@ -1,50 +1,44 @@
 # dev-toolkit-31
 
-`dev-toolkit-31` is a robust Python utility suite designed to streamline routine development tasks and automate common command-line operations. It provides a centralized hub for environment management, file processing, and local server orchestration to boost developer productivity.
+A high-performance Python utility suite designed to streamline local development workflows and automate repetitive CLI tasks. It provides a robust framework for project scaffolding, environment management, and code linting across multiple repositories.
 
-### Key Features
+## Features
 
-*   **Project Scaffolding:** Rapidly generate standardized directory structures and boilerplate configurations for new Python projects.
-*   **Environment Sync:** Effortlessly synchronize environment variables and dependency files across local and staging configurations.
-*   **Log Analytics:** An embedded lightweight parser to filter, search, and aggregate data from application logs in real-time.
-*   **Task Runner:** A streamlined wrapper to manage concurrent execution of linters, formatters, and test suites with custom task definitions.
+*   **Scaffold Automation:** Quickly initialize project structures with pre-configured boilerplate templates for Flask, FastAPI, and custom CLI tools.
+*   **Environment Sync:** Synchronize local virtual environment dependencies and environment variables across cross-platform setups seamlessly.
+*   **Lint & Format Engine:** Integrated wrapper for Black, Flake8, and Mypy that enforces project-wide code standards with a single command.
+*   **Log Analytics:** Lightweight log parsing utility that extracts and summarizes error patterns from local application logs for faster debugging.
 
-### Installation
+## Installation
 
-Requires Python 3.9 or higher. Install the toolkit globally or within your virtual environment:
+Ensure you have Python 3.9+ installed. Install the toolkit directly from the repository using pip:
 
 ```bash
-# Clone the repository
 git clone https://github.com/Developer/dev-toolkit-31.git
 cd dev-toolkit-31
-
-# Install requirements
-pip install -r requirements.txt
-
-# Install as a package
-pip install .
+pip install -e .
 ```
 
-### Usage
+## Usage
 
-Once installed, you can trigger specific toolkit modules via the `dtk` command.
+Once installed, use the `devtool` command to manage your projects. 
 
-**Running a project build:**
+**Initialize a new project scaffold:**
 ```bash
-dtk scaffold --name my-new-app --template fastapi
+devtool init --type fastapi --name my-web-app
 ```
 
-**Parsing logs from a file:**
+**Run automated linting on your current directory:**
 ```bash
-dtk logs parse ./app.log --level ERROR --output report.json
+devtool lint --path ./src --fix
 ```
 
-For a full list of commands and available flags, run:
+**Check the help menu for available modules:**
 ```bash
-dtk --help
+devtool --help
 ```
 
-### License
+## License
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
