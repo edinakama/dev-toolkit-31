@@ -1,54 +1,43 @@
 import sys
-import os
-from typing import Any
+import datetime
+from functools import wraps
 
-class FaultTolerantLogger:
-    """Resilient logger handling stream crashes, recursion, and unstr-able objects."""
+class DevLogger:
+    def __init__(self, name="dev-toolkit-31"):
+        self.name = name
+        self.styles = {
+            "info": "\033[94m",
+            "error": "\033[91m",
+            "success": "\033[92m",
+            "reset": "\033[0m"
+        }
 
-    def __init__(self, primary_stream=sys.stdout, max_fallback_depth: int = 3):
-        self.primary_stream = primary_stream
-        self.max_fallback_depth = max_fallback_depth
-        self._guard_flag = False
+    def log(self, message, level="info"):
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        style = self.styles.get(level, self.styles["reset"])
+        print(f"{style}[{self.name}][{timestamp}] {message.upper()}{self.styles['reset']}", file=sys.stderr)
 
-    def _safe_serialize(self, record: Any) -> str:
-        try:
-            return str(record)
-        except Exception as err:
+    def trap(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
             try:
-                return f"<Unprintable object {type(record).__name__}: {repr(err)}>"
-            except Exception:
-                return "<Unprintable object: stringification failed>"
+                return func(*args, **kwargs)
+            except Exception as e:
+                self.log(f"execution failure in {func.__name__}: {str(e)}", level="error")
+                raise e
+        return wrapper
 
-    def log(self, message: Any, level: str = "INFO", depth: int = 0) -> bool:
-        if depth > self.max_fallback_depth:
-            return False
+# global logger instance
+logger = DevLogger()
 
-        if self._guard_flag and depth == 0:
-            sys.stderr.write("[CRITICAL] Recursive logging call intercepted.\n")
-            return False
+def log_call(func):
+    return logger.trap(func)
 
-        self._guard_flag = True
-        try:
-            formatted_msg = self._safe_serialize(message)
-            out_str = f"[{level.upper()}] {formatted_msg}\n"
-            
-            try:
-                self.primary_stream.write(out_str)
-                self.primary_stream.flush()
-                return True
-            except (IOError, OSError, AttributeError):
-                sys.stderr.write(f"[FALLBACK] {out_str}")
-                sys.stderr.flush()
-                return True
-        except Exception as exc:
-            try:
-                err_msg = f"[EMERGENCY-LOG] {exc.__class__.__name__}\n".encode("utf-8")
-                os.write(2, err_msg)
-                return self.log(f"Recovered logging error: {exc}", level="ERROR", depth=depth + 1)
-            except Exception:
-                return False
-        finally:
-            self._guard_flag = False
+def info(msg):
+    logger.log(msg, "info")
 
-def get_logger(stream=None) -> FaultTolerantLogger:
-    return FaultTolerantLogger(primary_stream=stream or sys.stdout)
+def error(msg):
+    logger.log(msg, "error")
+
+def success(msg):
+    logger.log(msg, "success")
