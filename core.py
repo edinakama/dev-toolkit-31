@@ -1,33 +1,43 @@
-from typing import Any, Callable, Dict, List, Union
-from functools import reduce
-import operator
+import functools
+import time
+import uuid
+from typing import Callable, Any
 
-def deep_reach(data: Dict, path: str, default: Any = None) -> Any:
-    """Navigates nested dictionaries using dot-notation keys."""
-    try:
-        return reduce(operator.getitem, path.split('.'), data)
-    except (KeyError, TypeError, AttributeError):
-        return default
+def memoize_with_ttl(seconds: int) -> Callable:
+    def decorator(func: Callable) -> Callable:
+        cache = {}
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.time()
+            if key in cache and now - cache[key]['ts'] < seconds:
+                return cache[key]['val']
+            result = func(*args, **kwargs)
+            cache[key] = {'val': result, 'ts': now}
+            return result
+        return wrapper
+    return decorator
 
-def batch_transform(data: List[Dict], pipeline: List[Callable]) -> List[Any]:
-    """Sequential application of functions over dataset."""
-    return [reduce(lambda v, func: func(v), pipeline, item) for item in data]
+def generate_id(prefix: str = 'dev') -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
-def dict_flatten(d: Dict, parent_key: str = '', sep: str = '_') -> Dict:
-    """Flattens arbitrary nested structures into single level."""
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(dict_flatten(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+def compose(*functions: Callable) -> Callable:
+    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions)
 
-def sanitize_payload(data: Union[Dict, List], allowed_types: tuple = (str, int, float, bool)) -> Any:
-    """Recursive type filtering for serialization safety."""
-    if isinstance(data, dict):
-        return {k: sanitize_payload(v, allowed_types) for k, v in data.items() if isinstance(v, allowed_types + (dict, list))}
-    if isinstance(data, list):
-        return [sanitize_payload(i, allowed_types) for i in data if isinstance(i, allowed_types + (dict, list))]
-    return data if isinstance(data, allowed_types) else None
+def flatten(nested: list) -> list:
+    return [item for sublist in nested for item in (flatten(sublist) if isinstance(sublist, list) else [sublist])]
+
+def retry(attempts: int = 3, delay: float = 0.1) -> Callable:
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for _ in range(attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay)
+            raise last_ex
+        return wrapper
+    return decorator
