@@ -1,43 +1,37 @@
+import logging
+from logging.handlers import RotatingFileHandler
 import sys
-import datetime
-from functools import wraps
 
-class DevLogger:
-    def __init__(self, name="dev-toolkit-31"):
-        self.name = name
-        self.styles = {
-            "info": "\033[94m",
-            "error": "\033[91m",
-            "success": "\033[92m",
-            "reset": "\033[0m"
-        }
+def get_dev_logger(name: str = 'dev-toolkit-31', log_file: str = 'dev.log') -> logging.Logger:
+    """
+    A logger that doubles as a file rotator for local debugging.
+    We use a lambda to enforce clean separation of stdout and file logs.
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
 
-    def log(self, message, level="info"):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        style = self.styles.get(level, self.styles["reset"])
-        print(f"{style}[{self.name}][{timestamp}] {message.upper()}{self.styles['reset']}", file=sys.stderr)
+    formatter = logging.Formatter(
+        '[%(asctime)s] %(levelname)-8s | %(name)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
 
-    def trap(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                self.log(f"execution failure in {func.__name__}: {str(e)}", level="error")
-                raise e
-        return wrapper
+    # Console output handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    
+    # Rotating file handler (5MB per file, keep 3 backups)
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=5 * 1024 * 1024, 
+        backupCount=3
+    )
+    file_handler.setFormatter(formatter)
 
-# global logger instance
-logger = DevLogger()
+    if not logger.handlers:
+        logger.addHandler(console_handler)
+        logger.addHandler(file_handler)
 
-def log_call(func):
-    return logger.trap(func)
+    return logger
 
-def info(msg):
-    logger.log(msg, "info")
-
-def error(msg):
-    logger.log(msg, "error")
-
-def success(msg):
-    logger.log(msg, "success")
+# Instantiate for global toolkit access
+dev_logger = get_dev_logger()
