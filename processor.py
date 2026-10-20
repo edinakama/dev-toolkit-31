@@ -1,57 +1,61 @@
-import sys
-from typing import Any, Dict, Generator, List, Tuple
+import collections.abc
+from typing import Any, Callable, Dict, List
 
 
-class ValidationError(Exception):
-    """Raised when stream payload fails strict type or schema checks."""
-    pass
+class StreamTransformer:
+    """Data processor using pipe operator for flexible nested transformations."""
+
+    def __init__(self, step: Callable[[Any], Any]):
+        self.step = step
+
+    def __ror__(self, data: Any) -> Any:
+        return self._apply(data)
+
+    def __or__(self, next_step: "StreamTransformer") -> "StreamTransformer":
+        return StreamTransformer(lambda d: next_step.step(self.step(d)))
+
+    def _apply(self, data: Any) -> Any:
+        if isinstance(data, list):
+            return [self._apply(item) for item in data]
+        if isinstance(data, dict):
+            return {k: self._apply(v) for k, v in data.items()}
+        return self.step(data)
 
 
-def validate_payload(raw: Any) -> Dict[str, Any]:
-    match raw:
-        case {"action": str(act), "data": list(items)} if act in ("ingest", "purge") and items:
-            cleaned = [x for x in items if isinstance(x, (int, float, str))]
-            if not cleaned:
-                raise ValidationError("Payload 'data' array contains no scalar values")
-            return {"action": act, "data": cleaned}
-        case {"action": "ping"}:
-            return {"action": "pong", "data": []}
-        case _:
-            raise ValidationError(f"Malformed stream payload envelope: {raw!r}")
+def pluck(*keys: str) -> StreamTransformer:
+    """Filter dict objects inside stream to contain only specific keys."""
+
+    def _pluck(val: Any) -> Any:
+        if isinstance(val, dict):
+            return {k: v for k, v in val.items() if k in keys}
+        return val
+
+    return StreamTransformer(_pluck)
 
 
-def data_stream_processor(inputs: List[Any]) -> Generator[Tuple[bool, Any], None, None]:
-    """Main processing loop enforcing input validation via structural matching."""
-    for index, raw_input in enumerate(inputs):
+def morph(target_type: type, fallback: Any = None) -> StreamTransformer:
+    """Cast atomic values to target type with safe fallback."""
+
+    def _morph(val: Any) -> Any:
         try:
-            if not isinstance(raw_input, dict):
-                raise ValidationError(f"Expected record dict at index {index}, got {type(raw_input).__name__}")
-            
-            validated = validate_payload(raw_input)
-            
-            if validated["action"] == "ingest":
-                result = f"Processed {len(validated['data'])} records"
-            elif validated["action"] == "purge":
-                result = f"Purged {len(validated['data'])} records"
-            else:
-                result = "Heartbeat acknowledged"
-                
-            yield (True, {"index": index, "status": "success", "result": result})
-            
-        except ValidationError as err:
-            yield (False, {"index": index, "status": "rejected", "error": str(err)})
+            return target_type(val)
+        except (ValueError, TypeError):
+            return fallback if fallback is not None else val
+
+    return StreamTransformer(_morph)
 
 
-if __name__ == "__main__":
-    sample_batch = [
-        {"action": "ingest", "data": [10, 20, "valid"]},
-        {"action": "invalid_cmd", "data": [1, 2]},
-        "bad_string_element",
-        {"action": "ping"},
-        {"action": "purge", "data": []},
-    ]
+def flatten_dict(data: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
+    """Flatten nested dict into dot-notation map."""
+    flat: Dict[str, Any] = {}
 
-    for success, payload in data_stream_processor(sample_batch):
-        label = "OK" if success else "ERR"
-        msg = payload.get("result") or payload.get("error")
-        print(f"[{label}] Frame {payload['index']}: {msg}")
+    def _recursive_flatten(obj: Any, prefix: str = ""):
+        if isinstance(obj, collections.abc.Mapping):
+            for k, v in obj.items():
+                p = f"{prefix}{sep}{k}" if prefix else str(k)
+                _recursive_flatten(v, p)
+        else:
+            flat[prefix] = obj
+
+    _recursive_flatten(data)
+    return flat
