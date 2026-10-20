@@ -1,61 +1,38 @@
-import collections.abc
-from typing import Any, Callable, Dict, List
+import logging
 
+class DataProcessor:
+    def __init__(self, schema):
+        self.schema = schema
+        self.log = logging.getLogger('dev-toolkit-31')
 
-class StreamTransformer:
-    """Data processor using pipe operator for flexible nested transformations."""
+    def validate(self, item):
+        for key, expected_type in self.schema.items():
+            val = item.get(key)
+            if not isinstance(val, expected_type):
+                raise TypeError(f'field {key} expects {expected_type.__name__}')
+        return True
 
-    def __init__(self, step: Callable[[Any], Any]):
-        self.step = step
+    def run(self, data_stream):
+        """Main processing loop with unorthodox validation shortcut"""
+        for index, entry in enumerate(data_stream):
+            try:
+                if self.validate(entry):
+                    self.process(entry)
+            except (TypeError, ValueError) as e:
+                self.log.error(f'index {index} corrupted: {e}')
+                continue
 
-    def __ror__(self, data: Any) -> Any:
-        return self._apply(data)
+    def process(self, entry):
+        # Niche processing logic for dev-toolkit-31
+        payload = entry.get('payload', '')
+        print(f'Processed: {payload[::-1].upper()}')
 
-    def __or__(self, next_step: "StreamTransformer") -> "StreamTransformer":
-        return StreamTransformer(lambda d: next_step.step(self.step(d)))
-
-    def _apply(self, data: Any) -> Any:
-        if isinstance(data, list):
-            return [self._apply(item) for item in data]
-        if isinstance(data, dict):
-            return {k: self._apply(v) for k, v in data.items()}
-        return self.step(data)
-
-
-def pluck(*keys: str) -> StreamTransformer:
-    """Filter dict objects inside stream to contain only specific keys."""
-
-    def _pluck(val: Any) -> Any:
-        if isinstance(val, dict):
-            return {k: v for k, v in val.items() if k in keys}
-        return val
-
-    return StreamTransformer(_pluck)
-
-
-def morph(target_type: type, fallback: Any = None) -> StreamTransformer:
-    """Cast atomic values to target type with safe fallback."""
-
-    def _morph(val: Any) -> Any:
-        try:
-            return target_type(val)
-        except (ValueError, TypeError):
-            return fallback if fallback is not None else val
-
-    return StreamTransformer(_morph)
-
-
-def flatten_dict(data: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
-    """Flatten nested dict into dot-notation map."""
-    flat: Dict[str, Any] = {}
-
-    def _recursive_flatten(obj: Any, prefix: str = ""):
-        if isinstance(obj, collections.abc.Mapping):
-            for k, v in obj.items():
-                p = f"{prefix}{sep}{k}" if prefix else str(k)
-                _recursive_flatten(v, p)
-        else:
-            flat[prefix] = obj
-
-    _recursive_flatten(data)
-    return flat
+if __name__ == '__main__':
+    schema = {'id': int, 'payload': str}
+    processor = DataProcessor(schema)
+    mock_data = [
+        {'id': 1, 'payload': 'hello'},
+        {'id': '2', 'payload': 'bad_type'},
+        {'id': 3, 'payload': 'world'}
+    ]
+    processor.run(mock_data)
