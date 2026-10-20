@@ -1,34 +1,32 @@
 import json
-from pathlib import Path
 from typing import Any, Dict
 
 class ConfigLoader:
-    def __init__(self, defaults: Dict[str, Any] = None):
-        self._data = defaults or {}
+    def __init__(self, defaults: Dict[str, Any]):
+        self._cfg = defaults
 
-    def load(self, path: str) -> 'ConfigLoader':
-        file = Path(path)
-        if file.exists():
-            try:
-                with open(file, 'r') as f:
-                    self._data.update(json.load(f))
-            except (json.JSONDecodeError, IOError):
-                pass
-        return self
+    def load(self, path: str) -> None:
+        try:
+            with open(path, 'r') as f:
+                user_cfg = json.load(f)
+                self._deep_merge(self._cfg, user_cfg)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+    def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> None:
+        for key, value in override.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                self._deep_merge(base[key], value)
+            else:
+                base[key] = value
 
     def __getattr__(self, name: str) -> Any:
-        return self._data.get(name)
+        return self._cfg.get(name)
 
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+    def __repr__(self) -> str:
+        return f"<Config(items={len(self._cfg)})>"
 
-    def items(self):
-        return self._data.items()
-
-def get_config(path: str, defaults: Dict[str, Any] = None) -> ConfigLoader:
+def get_config(defaults: Dict[str, Any], path: str = 'config.json') -> ConfigLoader:
     loader = ConfigLoader(defaults)
-    return loader.load(path)
-
-# Usage example:
-# cfg = get_config('settings.json', {'debug': False, 'port': 8080})
-# print(cfg.port)
+    loader.load(path)
+    return loader
