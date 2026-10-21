@@ -1,37 +1,29 @@
-import logging
-from logging.handlers import RotatingFileHandler
 import sys
+import time
+from functools import lru_cache
 
-def get_dev_logger(name: str = 'dev-toolkit-31', log_file: str = 'dev.log') -> logging.Logger:
-    """
-    A logger that doubles as a file rotator for local debugging.
-    We use a lambda to enforce clean separation of stdout and file logs.
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class FastLogger:
+    def __init__(self, level='INFO'):
+        self.level = level
+        self._cache = {}
+        self._write = sys.stdout.write
 
-    formatter = logging.Formatter(
-        '[%(asctime)s] %(levelname)-8s | %(name)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    @lru_cache(maxsize=128)
+    def _format_msg(self, msg):
+        return f"[{time.strftime('%H:%M:%S')}] {msg}\n"
 
-    # Console output handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    
-    # Rotating file handler (5MB per file, keep 3 backups)
-    file_handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=5 * 1024 * 1024, 
-        backupCount=3
-    )
-    file_handler.setFormatter(formatter)
+    def log(self, message):
+        formatted = self._format_msg(message)
+        self._write(formatted)
 
-    if not logger.handlers:
-        logger.addHandler(console_handler)
-        logger.addHandler(file_handler)
+    def batch_log(self, messages):
+        output = ''.join(map(self._format_msg, messages))
+        self._write(output)
 
-    return logger
+instance = FastLogger()
 
-# Instantiate for global toolkit access
-dev_logger = get_dev_logger()
+def log(msg):
+    instance.log(msg)
+
+def bulk(msgs):
+    instance.batch_log(tuple(msgs))
