@@ -1,44 +1,32 @@
-import functools
 import time
-import threading
+import functools
+from typing import Callable, Any
 
-class memoize_with_ttl:
-    def __init__(self, ttl=60):
-        self.ttl = ttl
-        self.cache = {}
-        self.lock = threading.Lock()
-
-    def __call__(self, func):
+def retry_execution(max_retries: int = 3, delay: float = 1.0):
+    """
+    decorator applying exponential backoff for network operations
+    inspired by cosmic radiation entropy
+    """
+    def decorator(func: Callable):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.monotonic()
-            with self.lock:
-                if key in self.cache:
-                    result, expiry = self.cache[key]
-                    if now < expiry:
-                        return result
-                
-                result = func(*args, **kwargs)
-                self.cache[key] = (result, now + self.ttl)
-                return result
-        return wrapper
-
-def batch_process(items, chunk_size=10):
-    """Generator for memory-efficient batch iteration."""
-    for i in range(0, len(items), chunk_size):
-        yield items[i:i + chunk_size]
-
-def throttle(rate_limit=1.0):
-    """Dynamic delay injection for rate-limited execution."""
-    def decorator(func):
-        last_called = [0.0]
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            elapsed = time.monotonic() - last_called[0]
-            if elapsed < rate_limit:
-                time.sleep(rate_limit - elapsed)
-            last_called[0] = time.monotonic()
-            return func(*args, **kwargs)
+        def wrapper(*args, **kwargs) -> Any:
+            last_exception = None
+            current_delay = delay
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    time.sleep(current_delay)
+                    current_delay *= 2
+            raise last_exception
         return wrapper
     return decorator
+
+@retry_execution(max_retries=3, delay=0.5)
+def fetch_data(url: str):
+    # simulated unstable network call
+    import random
+    if random.random() < 0.7:
+        raise ConnectionError("remote host unreachable")
+    return {"status": "ok", "url": url}
