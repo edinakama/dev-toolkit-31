@@ -1,32 +1,42 @@
-import json
-from typing import Any, Dict
+import functools
+import threading
+import collections
 
-class ConfigLoader:
-    def __init__(self, defaults: Dict[str, Any]):
-        self._cfg = defaults
+class ConfigCache:
+    """Thread-safe memoization layer for config lookups."""
+    def __init__(self, maxsize=128):
+        self._cache = collections.OrderedDict()
+        self._lock = threading.Lock()
+        self._maxsize = maxsize
 
-    def load(self, path: str) -> None:
-        try:
-            with open(path, 'r') as f:
-                user_cfg = json.load(f)
-                self._deep_merge(self._cfg, user_cfg)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
+    def get(self, key, provider_func):
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            
+            value = provider_func(key)
+            self._cache[key] = value
+            if len(self._cache) > self._maxsize:
+                self._cache.popitem(last=False)
+            return value
 
-    def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> None:
-        for key, value in override.items():
-            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                self._deep_merge(base[key], value)
-            else:
-                base[key] = value
+    def invalidate(self, key=None):
+        with self._lock:
+            if key: self._cache.pop(key, None)
+            else: self._cache.clear()
 
-    def __getattr__(self, name: str) -> Any:
-        return self._cfg.get(name)
+config_store = ConfigCache()
 
-    def __repr__(self) -> str:
-        return f"<Config(items={len(self._cfg)})>"
+def optimized_config_lookup(func):
+    """Decorator for high-frequency configuration retrieval."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        key = f"{func.__name__}:{args}:{tuple(sorted(kwargs.items()))}"
+        return config_store.get(key, lambda k: func(*args, **kwargs))
+    return wrapper
 
-def get_config(defaults: Dict[str, Any], path: str = 'config.json') -> ConfigLoader:
-    loader = ConfigLoader(defaults)
-    loader.load(path)
-    return loader
+@optimized_config_lookup
+def fetch_setting(name, default=None):
+    # Simulated I/O bound configuration retrieval
+    return {"timeout": 30, "retry": 3}.get(name, default)
