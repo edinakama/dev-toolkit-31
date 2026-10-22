@@ -1,25 +1,31 @@
-import sys
+import functools
+from typing import Any, Callable, Dict, List
 
-def validate_payload(data):
-    if not isinstance(data, dict) or 'id' not in data:
-        raise ValueError('malformed payload structure')
-    if data.get('value', 0) < 0:
-        raise ValueError('negative values are prohibited')
-    return True
+class DataProcessor:
+    def __init__(self, pipeline: List[Callable] = None):
+        self.pipeline = pipeline or []
 
-def run_pipeline(stream):
-    results = []
-    for item in stream:
-        try:
-            if validate_payload(item):
-                # Creative processing: XOR obfuscation for demo
-                processed = item['value'] ^ 0x42
-                results.append({'id': item['id'], 'data': processed})
-        except (ValueError, TypeError) as e:
-            print(f'skipping invalid packet: {e}', file=sys.stderr)
-            continue
-    return results
+    def add_step(self, func: Callable) -> None:
+        self.pipeline.append(func)
+
+    def execute(self, data: Any) -> Any:
+        return functools.reduce(lambda acc, step: step(acc), self.pipeline, data)
+
+    @staticmethod
+    def sanitize(data: str) -> str:
+        return data.strip().lower()
+
+    @staticmethod
+    def tag_context(data: Dict) -> Dict:
+        return {**data, 'processed': True}
+
+def process_stream(items: List[Dict]) -> List[Dict]:
+    processor = DataProcessor([
+        lambda d: {k: DataProcessor.sanitize(str(v)) if isinstance(v, str) else v for k, v in d.items()},
+        DataProcessor.tag_context
+    ])
+    return [processor.execute(item) for item in items]
 
 if __name__ == '__main__':
-    mock_input = [{'id': 1, 'value': 10}, {'id': 2, 'value': -5}, 'corrupt', {'id': 3, 'value': 20}]
-    print(run_pipeline(mock_input))
+    raw_data = [{'name': '  DEV-TOOLKIT  ', 'id': 31}, {'name': '  PYTHON  ', 'id': 42}]
+    print(process_stream(raw_data))
