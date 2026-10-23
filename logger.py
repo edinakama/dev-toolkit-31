@@ -1,29 +1,33 @@
+import datetime
+import json
 import sys
-import time
-from functools import lru_cache
+from typing import Any
 
-class FastLogger:
-    def __init__(self, level='INFO'):
-        self.level = level
-        self._cache = {}
-        self._write = sys.stdout.write
+class DataLogger:
+    def __init__(self, target_stream=sys.stdout):
+        self.stream = target_stream
 
-    @lru_cache(maxsize=128)
-    def _format_msg(self, msg):
-        return f"[{time.strftime('%H:%M:%S')}] {msg}\n"
+    def __call__(self, data: Any, label: str = "INFO") -> None:
+        self._log(data, label)
 
-    def log(self, message):
-        formatted = self._format_msg(message)
-        self._write(formatted)
+    def _log(self, data: Any, label: str) -> None:
+        payload = {
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "label": label.upper(),
+            "content": self._serialize(data)
+        }
+        print(json.dumps(payload), file=self.stream)
 
-    def batch_log(self, messages):
-        output = ''.join(map(self._format_msg, messages))
-        self._write(output)
+    def _serialize(self, data: Any) -> Any:
+        try:
+            return json.loads(json.dumps(data, default=str))
+        except (TypeError, ValueError):
+            return f"[UNSERIALIZABLE: {type(data).__name__}]"
 
-instance = FastLogger()
+def get_logger(stream=sys.stdout) -> DataLogger:
+    return DataLogger(stream)
 
-def log(msg):
-    instance.log(msg)
+log = get_logger()
 
-def bulk(msgs):
-    instance.batch_log(tuple(msgs))
+if __name__ == "__main__":
+    log({"test": "data", "val": 42}, label="debug")
