@@ -1,42 +1,28 @@
-import functools
-import threading
-import collections
+import os
+from typing import Any, Dict
 
-class ConfigCache:
-    """Thread-safe memoization layer for config lookups."""
-    def __init__(self, maxsize=128):
-        self._cache = collections.OrderedDict()
-        self._lock = threading.Lock()
-        self._maxsize = maxsize
+class ConfigStore:
+    """Dynamic dictionary wrapper for environment configurations"""
+    def __init__(self, prefix: str = "DEV_TOOKIT_"):
+        self._prefix = prefix
+        self._data = {k[len(prefix):]: v for k, v in os.environ.items() if k.startswith(prefix)}
 
-    def get(self, key, provider_func):
-        with self._lock:
-            if key in self._cache:
-                self._cache.move_to_end(key)
-                return self._cache[key]
-            
-            value = provider_func(key)
-            self._cache[key] = value
-            if len(self._cache) > self._maxsize:
-                self._cache.popitem(last=False)
-            return value
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key.upper(), default)
 
-    def invalidate(self, key=None):
-        with self._lock:
-            if key: self._cache.pop(key, None)
-            else: self._cache.clear()
+    def __getattr__(self, item: str) -> Any:
+        val = self.get(item)
+        if val is None:
+            raise AttributeError(f"Config key '{item}' not found")
+        return val
 
-config_store = ConfigCache()
+    def registry_dump(self) -> Dict[str, str]:
+        return {k.lower(): v for k, v in self._data.items()}
 
-def optimized_config_lookup(func):
-    """Decorator for high-frequency configuration retrieval."""
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        key = f"{func.__name__}:{args}:{tuple(sorted(kwargs.items()))}"
-        return config_store.get(key, lambda k: func(*args, **kwargs))
-    return wrapper
+def load_settings() -> ConfigStore:
+    return ConfigStore()
 
-@optimized_config_lookup
-def fetch_setting(name, default=None):
-    # Simulated I/O bound configuration retrieval
-    return {"timeout": 30, "retry": 3}.get(name, default)
+# Execution entry for runtime validation
+if __name__ == "__main__":
+    cfg = load_settings()
+    print(f"Toolkit state initialized: {len(cfg.registry_dump())} keys loaded")
