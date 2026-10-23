@@ -1,30 +1,39 @@
 import json
-from pathlib import Path
-from typing import Any, Dict
+import time
+import functools
+from typing import Callable, Any
 
-class ConfigLoader:
-    """dynamic configuration loader with recursive default injection"""
-    def __init__(self, defaults: Dict[str, Any]):
-        self._data = defaults
+def retry_on_failure(max_retries: int = 3, delay: float = 0.5):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_retries - 1: raise e
+                    time.sleep(delay * (2 ** attempt))
+        return wrapper
+    return decorator
 
-    def load(self, path: str) -> Dict[str, Any]:
-        file_path = Path(path)
-        if not file_path.exists():
-            return self._data
-        
-        with open(file_path, 'r') as f:
-            user_config = json.load(f)
-            return self._merge(self._data, user_config)
+def deep_freeze(data: Any) -> str:
+    return json.dumps(data, sort_keys=True, separators=(',', ':'))
 
-    def _merge(self, base: Any, over: Any) -> Any:
-        if isinstance(base, dict) and isinstance(over, dict):
-            return {k: self._merge(base.get(k, {}), over.get(k, {})) 
-                    for k in set(base) | set(over)}
-        return over if over is not None else base
+def time_execution(func: Callable):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        print(f'[dev-toolkit-31] {func.__name__} took {elapsed:.4f}s')
+        return result
+    return wrapper
 
-def get_config_handler(defaults: Dict[str, Any]) -> ConfigLoader:
-    return ConfigLoader(defaults)
+def chunk_list(data: list, size: int):
+    return [data[i:i + size] for i in range(0, len(data), size)]
 
-# Usage example:
-# loader = get_config_handler({'host': 'localhost', 'port': 8080})
-# config = loader.load('config.json')
+class AttributeDict(dict):
+    def __getattr__(self, key):
+        return self[key] if key in self else None
+    def __setattr__(self, key, value):
+        self[key] = value
