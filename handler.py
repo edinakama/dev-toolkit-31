@@ -1,57 +1,49 @@
-import math
-import sys
-from typing import Any, Callable, Union
+import functools
+import time
+import collections
+from typing import Callable, Any, Dict
 
-
-class EdgeGuard:
-    """Creative decorator wrapper for swallowing and normalizing extreme edge cases."""
-
-    def __init__(self, fallback: Any = None, coerce_types: bool = True):
-        self.fallback = fallback
-        self.coerce_types = coerce_types
-
-    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            sanitized_args = tuple(self._sanitize(a) for a in args)
-            sanitized_kwargs = {k: self._sanitize(v) for k, v in kwargs.items()}
-            try:
-                res = func(*sanitized_args, **sanitized_kwargs)
-                return self._sanitize(res)
-            except (ValueError, TypeError, ZeroDivisionError, OverflowError) as err:
-                return self._salvage(func, err, *sanitized_args, **sanitized_kwargs)
-
+def memoize_with_expiry(ttl: int) -> Callable:
+    def decorator(func: Callable) -> Callable:
+        cache: Dict[tuple, tuple] = {}
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (args, frozenset(kwargs.items()))
+            now = time.time()
+            if key in cache:
+                result, timestamp = cache[key]
+                if now - timestamp < ttl:
+                    return result
+            result = func(*args, **kwargs)
+            cache[key] = (result, now)
+            return result
         return wrapper
+    return decorator
 
-    def _sanitize(self, val: Any) -> Any:
-        if isinstance(val, float):
-            if math.isnan(val):
-                return 0.0
-            if math.isinf(val):
-                return sys.float_info.max if val > 0 else -sys.float_info.max
-        elif isinstance(val, (bytes, bytearray)):
-            return val.decode("utf-8", errors="replace")
-        elif isinstance(val, (list, tuple)) and len(val) == 0:
-            return self.fallback if self.fallback is not None else val
-        return val
+def deep_flatten(items: list) -> list:
+    result = []
+    for item in items:
+        if isinstance(item, list):
+            result.extend(deep_flatten(item))
+        else:
+            result.append(item)
+    return result
 
-    def _salvage(
-        self, func: Callable[..., Any], err: Exception, *args: Any, **kwargs: Any
-    ) -> Any:
-        if isinstance(err, ZeroDivisionError):
-            return self.fallback if self.fallback is not None else float("inf")
-        if isinstance(err, OverflowError):
-            return sys.maxsize
-        if isinstance(err, (TypeError, ValueError)) and self.coerce_types:
-            try:
-                str_args = tuple(str(a) for a in args)
-                return func(*str_args, **kwargs)
-            except Exception:
-                pass
-        return self.fallback
+def compose(*functions: Callable) -> Callable:
+    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
 
+def pluck(data: list[dict], key: str) -> list:
+    return [d[key] for d in data if key in d]
 
-@EdgeGuard(fallback="[SAFE_FALLBACK]")
-def safe_divide_and_format(a: Union[int, float, str], b: Union[int, float, str]) -> str:
-    num_a, num_b = float(a), float(b)
-    res = num_a / num_b
-    return f"Result: {res:.2f}"
+class Registry:
+    def __init__(self):
+        self._store = collections.defaultdict(list)
+    
+    def register(self, tag: str):
+        def decorator(func: Callable):
+            self._store[tag].append(func)
+            return func
+        return decorator
+
+    def execute(self, tag: str, *args, **kwargs):
+        return [f(*args, **kwargs) for f in self._store.get(tag, [])]
