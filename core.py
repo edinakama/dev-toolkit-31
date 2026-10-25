@@ -1,43 +1,37 @@
 import functools
 import time
-import uuid
-from typing import Callable, Any
+import collections
 
-def memoize_with_ttl(seconds: int) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        cache = {}
+class memoize_with_ttl:
+    def __init__(self, ttl=60):
+        self.ttl = ttl
+        self.cache = {}
+        self.expiry = {}
+
+    def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             key = (args, tuple(sorted(kwargs.items())))
             now = time.time()
-            if key in cache and now - cache[key]['ts'] < seconds:
-                return cache[key]['val']
+            if key in self.cache and now < self.expiry[key]:
+                return self.cache[key]
             result = func(*args, **kwargs)
-            cache[key] = {'val': result, 'ts': now}
+            self.cache[key] = result
+            self.expiry[key] = now + self.ttl
             return result
         return wrapper
-    return decorator
 
-def generate_id(prefix: str = 'dev') -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+class CoreProcessor:
+    def __init__(self):
+        self.registry = collections.deque(maxlen=1000)
 
-def compose(*functions: Callable) -> Callable:
-    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions)
+    @memoize_with_ttl(ttl=30)
+    def heavy_computation(self, data: int) -> int:
+        return sum(i * i for i in range(data))
 
-def flatten(nested: list) -> list:
-    return [item for sublist in nested for item in (flatten(sublist) if isinstance(sublist, list) else [sublist])]
+    def process_batch(self, items):
+        return [self.heavy_computation(i) for i in items]
 
-def retry(attempts: int = 3, delay: float = 0.1) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_ex = None
-            for _ in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay)
-            raise last_ex
-        return wrapper
-    return decorator
+if __name__ == '__main__':
+    cp = CoreProcessor()
+    print(cp.process_batch([1000, 2000, 1000]))
