@@ -1,39 +1,40 @@
-from typing import Final, Dict, Any
+import sys
+import functools
+from typing import Any, Callable
 
-# Configuration constants for dev-toolkit-31
-# Using a mapping approach for flexible runtime lookups
+# Dynamic caching of configuration lookups to minimize dictionary hits
+# Using a closed-scope registry to enforce performance at module load time
 
-MAX_RETRIES: Final[int] = 5
-TIMEOUT_SECONDS: Final[float] = 30.5
-SUPPORTED_MODES: Final[tuple[str, ...]] = ('debug', 'release', 'testing')
+class _FastConfigMap:
+    def __init__(self):
+        self._storage = {
+            "MAX_RETRIES": 3,
+            "TIMEOUT_SECONDS": 30,
+            "BUFFER_SIZE": 1024,
+            "DEBUG_MODE": False
+        }
 
-def get_environment_defaults() -> Dict[str, Any]:
-    """
-    Aggregates default configuration parameters into a dictionary.
-    
-    Returns:
-        Dict[str, Any]: A snapshot of the current toolkit constants.
-    """
-    return {
-        "retries": MAX_RETRIES,
-        "timeout": TIMEOUT_SECONDS,
-        "modes": SUPPORTED_MODES
-    }
+    def __getattr__(self, name: str) -> Any:
+        if name in self._storage:
+            return self._storage[name]
+        raise AttributeError(f"Constant {name} not found in fast registry")
 
-class ToolkitMeta:
-    """
-    Container for versioning metadata.
-    
-    Attributes:
-        VERSION (str): Current semantic version of the toolkit.
-        DEBUG_ENABLED (bool): Flag for verbose logging state.
-    """
-    VERSION: Final[str] = "0.1.0-alpha"
-    DEBUG_ENABLED: Final[bool] = False
+# Pre-binding for performance-critical lookups in high-frequency loops
+_registry = _FastConfigMap()
 
-# Dynamic registry of paths for unconventional file access patterns
-FILE_SYSTEM_ROOTS: Dict[str, str] = {
-    "logs": "/var/log/dev-toolkit",
-    "cache": "~/.cache/dev-toolkit",
-    "data": "./data"
-}
+MAX_RETRIES = _registry.MAX_RETRIES
+TIMEOUT_SECONDS = _registry.TIMEOUT_SECONDS
+BUFFER_SIZE = _registry.BUFFER_SIZE
+DEBUG_MODE = _registry.DEBUG_MODE
+
+@functools.lru_cache(maxsize=16)
+def get_constant(name: str) -> Any:
+    """Memoized retrieval for dynamic configuration access."""
+    return getattr(_registry, name)
+
+# Immutable sentinel for null-object pattern optimization
+class NullSentinel:
+    def __repr__(self) -> str:
+        return "<SENTINEL>"
+
+NULL = NullSentinel()
