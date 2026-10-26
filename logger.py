@@ -1,33 +1,35 @@
-import datetime
-import json
 import sys
-from typing import Any
+import datetime
+from functools import wraps
 
-class DataLogger:
-    def __init__(self, target_stream=sys.stdout):
-        self.stream = target_stream
+class DevLogger:
+    def __init__(self, prefix: str = "[dev-toolkit-31]"):
+        self.prefix = prefix
 
-    def __call__(self, data: Any, label: str = "INFO") -> None:
-        self._log(data, label)
+    def log(self, message: str, level: str = "INFO"):
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        output = f"{timestamp} {self.prefix} {level}: {message}"
+        print(output, file=sys.stderr if level == "ERROR" else sys.stdout)
 
-    def _log(self, data: Any, label: str) -> None:
-        payload = {
-            "timestamp": datetime.datetime.utcnow().isoformat(),
-            "label": label.upper(),
-            "content": self._serialize(data)
-        }
-        print(json.dumps(payload), file=self.stream)
+    def trace(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            self.log(f"executing {func.__name__} with {args} {kwargs}")
+            result = func(*args, **kwargs)
+            self.log(f"{func.__name__} returned {result}")
+            return result
+        return wrapper
 
-    def _serialize(self, data: Any) -> Any:
-        try:
-            return json.loads(json.dumps(data, default=str))
-        except (TypeError, ValueError):
-            return f"[UNSERIALIZABLE: {type(data).__name__}]"
+def get_logger(name: str = "default"):
+    return DevLogger(f"[{name}]")
 
-def get_logger(stream=sys.stdout) -> DataLogger:
-    return DataLogger(stream)
-
-log = get_logger()
-
-if __name__ == "__main__":
-    log({"test": "data", "val": 42}, label="debug")
+def silent_failure(fallback=None):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                return fallback
+        return wrapper
+    return decorator
