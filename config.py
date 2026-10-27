@@ -1,56 +1,32 @@
-import json
 import os
-from collections import ChainMap
-from pathlib import Path
-from typing import Any, Dict, Union
+import json
+from typing import Any, Dict
 
-
-class DeepChainConfig:
-    """Nested configuration loader using ChainMap with env variable overlays."""
-
-    def __init__(self, primary: Dict[str, Any] = None, defaults: Dict[str, Any] = None):
-        self._primary = primary if primary is not None else {}
-        self._defaults = defaults if defaults is not None else {}
-        self._map = ChainMap(self._primary, self._defaults)
+class ConfigLoader:
+    def __init__(self, defaults: Dict[str, Any]):
+        self._data = defaults.copy()
 
     def __getattr__(self, name: str) -> Any:
-        env_key = name.upper()
-        if env_key in os.environ:
-            return self._coerce(os.environ[env_key])
+        return self._data.get(name)
 
-        if name not in self._map:
-            raise AttributeError(f"Missing configuration key: {name}")
-
-        val = self._map[name]
-        if isinstance(val, dict):
-            def_sub = self._defaults.get(name, {}) if isinstance(self._defaults.get(name), dict) else {}
-            return DeepChainConfig(val, def_sub)
-        return val
-
-    def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
-
-    @staticmethod
-    def _coerce(val: str) -> Any:
-        if val.lower() in ("true", "false"):
-            return val.lower() == "true"
-        for cast in (int, float):
-            try:
-                return cast(val)
-            except ValueError:
-                pass
-        return val
-
-    def load_file(self, filepath: Union[str, Path]) -> "DeepChainConfig":
-        path = Path(filepath)
-        if path.exists():
-            with path.open("r", encoding="utf-8") as f:
-                self._primary.update(json.load(f))
+    def load_json(self, filepath: str) -> 'ConfigLoader':
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as f:
+                loaded = json.load(f)
+                self._data.update({k: v for k, v in loaded.items() if k in self._data})
         return self
 
+    def env_override(self, prefix: str = 'APP_') -> 'ConfigLoader':
+        for key in self._data.keys():
+            env_val = os.getenv(f"{prefix}{key.upper()}")
+            if env_val is not None:
+                self._data[key] = type(self._data[key])(env_val)
+        return self
 
-def create_config(filepath: Union[str, Path] = None, defaults: Dict[str, Any] = None) -> DeepChainConfig:
-    cfg = DeepChainConfig(defaults=defaults or {})
-    if filepath:
-        cfg.load_file(filepath)
-    return cfg
+    def to_dict(self) -> Dict[str, Any]:
+        return self._data
+
+if __name__ == '__main__':
+    defaults = {'port': 8080, 'debug': False}
+    cfg = ConfigLoader(defaults).load_json('config.json').env_override()
+    print(f"Active port: {cfg.port}")
