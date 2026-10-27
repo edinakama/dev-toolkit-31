@@ -1,39 +1,44 @@
-import json
-import time
 import functools
-from typing import Callable, Any
+import logging
+from typing import Callable, Any, Dict
 
-def retry_on_failure(max_retries: int = 3, delay: float = 0.5):
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('dev-toolkit-31')
+
+class Registry:
+    _storage: Dict[str, Any] = {}
+
+    @classmethod
+    def register(cls, key: str):
+        def decorator(func: Callable):
+            cls._storage[key] = func
+            return func
+        return decorator
+
+    @classmethod
+    def execute(cls, key: str, *args, **kwargs):
+        if key not in cls._storage:
+            raise KeyError(f'no operation found for {key}')
+        return cls._storage[key](*args, **kwargs)
+
+def resilient(retries: int = 3):
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            for attempt in range(max_retries):
+            last_ex = None
+            for attempt in range(retries):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    if attempt == max_retries - 1: raise e
-                    time.sleep(delay * (2 ** attempt))
+                    last_ex = e
+                    logger.warning(f'attempt {attempt+1} failed: {e}')
+            raise last_ex
         return wrapper
     return decorator
 
-def deep_freeze(data: Any) -> str:
-    return json.dumps(data, sort_keys=True, separators=(',', ':'))
+@Registry.register('noop')
+def noop(*args, **kwargs):
+    return None
 
-def time_execution(func: Callable):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = time.perf_counter() - start
-        print(f'[dev-toolkit-31] {func.__name__} took {elapsed:.4f}s')
-        return result
-    return wrapper
-
-def chunk_list(data: list, size: int):
-    return [data[i:i + size] for i in range(0, len(data), size)]
-
-class AttributeDict(dict):
-    def __getattr__(self, key):
-        return self[key] if key in self else None
-    def __setattr__(self, key, value):
-        self[key] = value
+def clean_dict(data: Dict) -> Dict:
+    return {k: v for k, v in data.items() if v is not None}
