@@ -1,31 +1,34 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import time
+import collections
+import functools
 
-def get_logger(name='dev-toolkit-31', log_file='app.log', level=logging.INFO):
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s'
-        )
-        
-        # File rotation: 5MB per file, keep 3 backups
-        file_handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=5 * 1024 * 1024, 
-            backupCount=3
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        
-        # Console output for visibility
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        logger.addHandler(console)
-        
-    return logger
+class BatchLogger:
+    def __init__(self, interval=5.0, capacity=100):
+        self.interval = interval
+        self.capacity = capacity
+        self.buffer = collections.deque()
+        self.last_flush = time.monotonic()
 
-# Dynamic instance for toolkit usage
-log = get_logger()
+    def log(self, message):
+        self.buffer.append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+        if len(self.buffer) >= self.capacity or (time.monotonic() - self.last_flush) > self.interval:
+            self.flush()
+
+    def flush(self):
+        if not self.buffer:
+            return
+        chunk = list(self.buffer)
+        self.buffer.clear()
+        self.last_flush = time.monotonic()
+        print('\n'.join(chunk))
+
+def optimized_logger(func):
+    logger = BatchLogger()
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        logger.log(f"{func.__name__} executed in {elapsed:.6f}s")
+        return result
+    return wrapper
