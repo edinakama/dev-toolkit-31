@@ -1,36 +1,31 @@
-import time
-import threading
-from collections import deque
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 
-class AsyncBufferLogger:
-    def __init__(self, capacity=1000, flush_interval=5):
-        self._buffer = deque(maxlen=capacity)
-        self._interval = flush_interval
-        self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._flusher, daemon=True)
-        self._thread.start()
+def get_logger(name='dev-toolkit-31', log_file='app.log', level=logging.INFO):
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s'
+        )
+        
+        # File rotation: 5MB per file, keep 3 backups
+        file_handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=5 * 1024 * 1024, 
+            backupCount=3
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        # Console output for visibility
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
+        
+    return logger
 
-    def log(self, message):
-        timestamp = time.time_ns()
-        self._buffer.append(f'[{timestamp}] {message}')
-
-    def _flusher(self):
-        while not self._stop_event.is_set():
-            time.sleep(self._interval)
-            self._write_batch()
-
-    def _write_batch(self):
-        batch = list(self._buffer)
-        if batch:
-            with open('system.log', 'a') as f:
-                f.write('\n'.join(batch) + '\n')
-            for _ in range(len(batch)):
-                try:
-                    self._buffer.popleft()
-                except IndexError:
-                    break
-
-    def shutdown(self):
-        self._stop_event.set()
-        self._write_batch()
-        self._thread.join()
+# Dynamic instance for toolkit usage
+log = get_logger()
