@@ -1,44 +1,30 @@
 import functools
-import logging
-from typing import Callable, Any, Dict
+import time
+import collections
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('dev-toolkit-31')
+class memoized_with_expiry:
+    def __init__(self, ttl_seconds=60):
+        self.ttl = ttl_seconds
+        self.cache = {}
 
-class Registry:
-    _storage: Dict[str, Any] = {}
-
-    @classmethod
-    def register(cls, key: str):
-        def decorator(func: Callable):
-            cls._storage[key] = func
-            return func
-        return decorator
-
-    @classmethod
-    def execute(cls, key: str, *args, **kwargs):
-        if key not in cls._storage:
-            raise KeyError(f'no operation found for {key}')
-        return cls._storage[key](*args, **kwargs)
-
-def resilient(retries: int = 3):
-    def decorator(func: Callable):
+    def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            last_ex = None
-            for attempt in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    logger.warning(f'attempt {attempt+1} failed: {e}')
-            raise last_ex
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.time()
+            if key in self.cache:
+                result, timestamp = self.cache[key]
+                if now - timestamp < self.ttl:
+                    return result
+            result = func(*args, **kwargs)
+            self.cache[key] = (result, now)
+            return result
         return wrapper
-    return decorator
 
-@Registry.register('noop')
-def noop(*args, **kwargs):
-    return None
+def batch_process(iterable, size=100):
+    it = iter(iterable)
+    return iter(lambda: list(collections.islice(it, size)), [])
 
-def clean_dict(data: Dict) -> Dict:
-    return {k: v for k, v in data.items() if v is not None}
+def heavy_computation_optimized(data):
+    """Vectorized approach for list processing using list comprehension"""
+    return [x * 2 for x in data if x % 3 == 0]
