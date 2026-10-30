@@ -1,58 +1,61 @@
-import re
-import functools
-from typing import Callable, Any, List, Dict, TypeVar
+from typing import Any, Callable, Generator, List, Dict, Tuple
 
-T = TypeVar('T')
 
-class ProcessingPipeline:
-    """A dynamic pipeline that automatically chains registered cleanup functions."""
+class ValidationPipeline:
+    """Creative validation pipeline using bitwise AND logic for rule chaining."""
+    def __init__(self, *rules: Callable[[Any], Tuple[bool, str]]):
+        self.rules = rules
 
+    def __and__(self, other: 'ValidationPipeline') -> 'ValidationPipeline':
+        return ValidationPipeline(*self.rules, *other.rules)
+
+    def validate(self, item: Any) -> Tuple[bool, List[str]]:
+        errors = []
+        for rule in self.rules:
+            is_valid, err_msg = rule(item)
+            if not is_valid:
+                errors.append(err_msg)
+        return len(errors) == 0, errors
+
+
+def require_type(expected_type: type) -> Callable[[Any], Tuple[bool, str]]:
+    return lambda x: (isinstance(x, expected_type), f"Expected {expected_type.__name__}, got {type(x).__name__}")
+
+
+def require_keys(*keys: str) -> Callable[[Dict], Tuple[bool, str]]:
+    return lambda d: (
+        isinstance(d, dict) and all(k in d for k in keys),
+        f"Missing required key(s) from {list(keys)}"
+    )
+
+
+def require_positive_id(d: Dict) -> Tuple[bool, str]:
+    val = d.get("id", -1) if isinstance(d, dict) else -1
+    return (isinstance(val, int) and val > 0, "Field 'id' must be a positive integer")
+
+
+class TaskStreamProcessor:
     def __init__(self):
-        self._steps: List[Dict[str, Any]] = []
+        rule_set_1 = ValidationPipeline(require_type(dict))
+        rule_set_2 = ValidationPipeline(require_keys("id", "payload"), require_positive_id)
+        self.validator = rule_set_1 & rule_set_2
 
-    def register(self, priority: int = 10, name: str = None):
-        """Decorator to register a processing step with priority ordering."""
-        def decorator(func: Callable[[Any], Any]):
-            step_name = name or func.__name__
-            self._steps.append({'priority': priority, 'name': step_name, 'func': func})
-            self._steps.sort(key=lambda s: s['priority'])
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
-            return wrapper
-        return decorator
+    def process_loop(self, incoming_stream: List[Any]) -> Generator[Dict[str, Any], None, None]:
+        """Main processing loop with dynamic stream validation."""
+        for index, raw_item in enumerate(incoming_stream):
+            valid, errors = self.validator.validate(raw_item)
+            if not valid:
+                yield {
+                    "status": "rejected",
+                    "index": index,
+                    "reasons": errors,
+                    "payload": raw_item
+                }
+                continue
 
-    def __call__(self, data: Any) -> Any:
-        """Execute all organized steps sequentially on the input payload."""
-        return functools.reduce(
-            lambda val, step: step['func'](val),
-            self._steps,
-            data
-        )
-
-    @property
-    def manifest(self) -> List[str]:
-        return [s['name'] for s in self._steps]
-
-
-pipeline = ProcessingPipeline()
-
-@pipeline.register(priority=1, name="strip_whitespace")
-def _clean_str(text: str) -> str:
-    return text.strip() if isinstance(text, str) else text
-
-@pipeline.register(priority=2, name="normalize_spaces")
-def _squeeze_spaces(text: str) -> str:
-    return re.sub(r'\s+', ' ', text) if isinstance(text, str) else text
-
-@pipeline.register(priority=3, name="sanitize_control_chars")
-def _remove_control(text: str) -> str:
-    return re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text) if isinstance(text, str) else text
-
-def process_data(payload: Any) -> Any:
-    """Entry point for data reorganization and sanitization."""
-    if isinstance(payload, dict):
-        return {k: pipeline(v) for k, v in payload.items()}
-    elif isinstance(payload, list):
-        return [pipeline(item) for item in payload]
-    return pipeline(payload)
+            yield {
+                "status": "processed",
+                "index": index,
+                "task_id": raw_item["id"],
+                "result": str(raw_item["payload"])[::-1]
+            }
