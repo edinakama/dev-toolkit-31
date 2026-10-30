@@ -1,37 +1,40 @@
 import functools
 import time
-import collections
+import uuid
+from typing import Callable, Any
 
-class memoize_with_ttl:
-    def __init__(self, ttl=60):
-        self.ttl = ttl
-        self.cache = {}
-        self.expiry = {}
-
-    def __call__(self, func):
+def memoize_with_expiry(ttl: int = 60):
+    def decorator(func: Callable):
+        cache = {}
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            key = (args, tuple(sorted(kwargs.items())))
+            key = (args, frozenset(kwargs.items()))
             now = time.time()
-            if key in self.cache and now < self.expiry[key]:
-                return self.cache[key]
+            if key in cache and now - cache[key]['ts'] < ttl:
+                return cache[key]['val']
             result = func(*args, **kwargs)
-            self.cache[key] = result
-            self.expiry[key] = now + self.ttl
+            cache[key] = {'val': result, 'ts': now}
             return result
         return wrapper
+    return decorator
 
-class CoreProcessor:
-    def __init__(self):
-        self.registry = collections.deque(maxlen=1000)
+def generate_slug(prefix: str = 'dev') -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
-    @memoize_with_ttl(ttl=30)
-    def heavy_computation(self, data: int) -> int:
-        return sum(i * i for i in range(data))
+def batch_process(items: list, size: int):
+    return [items[i:i + size] for i in range(0, len(items), size)]
 
-    def process_batch(self, items):
-        return [self.heavy_computation(i) for i in items]
-
-if __name__ == '__main__':
-    cp = CoreProcessor()
-    print(cp.process_batch([1000, 2000, 1000]))
+def retry_operation(attempts: int = 3, delay: float = 1.0):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for i in range(attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay * (2 ** i))
+            raise last_ex
+        return wrapper
+    return decorator
