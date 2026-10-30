@@ -1,34 +1,37 @@
-import time
-import collections
-import functools
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+from pathlib import Path
 
-class BatchLogger:
-    def __init__(self, interval=5.0, capacity=100):
-        self.interval = interval
-        self.capacity = capacity
-        self.buffer = collections.deque()
-        self.last_flush = time.monotonic()
+class DevToolkitLogger:
+    def __init__(self, name='dev-toolkit-31', log_dir='logs'):
+        self.path = Path(log_dir)
+        self.path.mkdir(exist_ok=True)
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        self._configure()
 
-    def log(self, message):
-        self.buffer.append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}")
-        if len(self.buffer) >= self.capacity or (time.monotonic() - self.last_flush) > self.interval:
-            self.flush()
+    def _configure(self):
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
+        )
+        
+        # Rotating file handler: 1MB per file, 5 backup files
+        file_handler = RotatingFileHandler(
+            self.path / 'app.log',
+            maxBytes=1024*1024,
+            backupCount=5
+        )
+        file_handler.setFormatter(formatter)
+        
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        
+        if not self.logger.handlers:
+            self.logger.addHandler(file_handler)
+            self.logger.addHandler(console_handler)
 
-    def flush(self):
-        if not self.buffer:
-            return
-        chunk = list(self.buffer)
-        self.buffer.clear()
-        self.last_flush = time.monotonic()
-        print('\n'.join(chunk))
+    def get_logger(self):
+        return self.logger
 
-def optimized_logger(func):
-    logger = BatchLogger()
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = time.perf_counter() - start
-        logger.log(f"{func.__name__} executed in {elapsed:.6f}s")
-        return result
-    return wrapper
+logger = DevToolkitLogger().get_logger()
