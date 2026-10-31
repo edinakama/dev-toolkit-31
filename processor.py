@@ -1,61 +1,65 @@
-from typing import Any, Callable, Generator, List, Dict, Tuple
+from typing import Any, Callable, Dict, List, Union
 
 
-class ValidationPipeline:
-    """Creative validation pipeline using bitwise AND logic for rule chaining."""
-    def __init__(self, *rules: Callable[[Any], Tuple[bool, str]]):
-        self.rules = rules
+class NestedMapProcessor:
+    """Nested dictionary processor supporting pipeline operations."""
 
-    def __and__(self, other: 'ValidationPipeline') -> 'ValidationPipeline':
-        return ValidationPipeline(*self.rules, *other.rules)
+    def __init__(self, data: Union[Dict, List]):
+        self._data = data
 
-    def validate(self, item: Any) -> Tuple[bool, List[str]]:
-        errors = []
-        for rule in self.rules:
-            is_valid, err_msg = rule(item)
-            if not is_valid:
-                errors.append(err_msg)
-        return len(errors) == 0, errors
+    @property
+    def raw(self) -> Union[Dict, List]:
+        return self._data
+
+    def flatten(self, sep: str = ".") -> Dict[str, Any]:
+        """Flattens nested structures into path-keyed mapping using generators."""
+
+        def _generator(obj: Any, prefix: str = ""):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    yield from _generator(v, f"{prefix}{k}{sep}" if prefix else f"{k}{sep}")
+            elif isinstance(obj, list):
+                for idx, v in enumerate(obj):
+                    yield from _generator(v, f"{prefix}{idx}{sep}" if prefix else f"{idx}{sep}")
+            else:
+                yield prefix.rstrip(sep), obj
+
+        return dict(_generator(self._data))
+
+    def unflatten(self, sep: str = ".") -> Dict[str, Any]:
+        """Reconstructs nested structures from flat path mappings."""
+        flat_data = self._data if isinstance(self._data, dict) else self.flatten(sep=sep)
+        result: Dict[str, Any] = {}
+
+        for key, value in flat_data.items():
+            parts = str(key).split(sep)
+            curr = result
+            for part in parts[:-1]:
+                curr = curr.setdefault(part, {})
+            curr[parts[-1]] = value
+
+        return result
+
+    def mutate_leaves(self, predicate: Callable[[Any], bool], transform: Callable[[Any], Any]) -> "NestedMapProcessor":
+        """Recursively applies transform logic to matching leaf nodes."""
+
+        def _mutate(node: Any) -> Any:
+            if isinstance(node, dict):
+                return {k: _mutate(v) for k, v in node.items()}
+            elif isinstance(node, list):
+                return [_mutate(v) for v in node]
+            return transform(node) if predicate(node) else node
+
+        return NestedMapProcessor(_mutate(self._data))
+
+    def __rshift__(self, func: Callable[[Any], Any]) -> "NestedMapProcessor":
+        """Enables functional syntax using standard shift pipeline operator."""
+        return NestedMapProcessor(func(self._data))
 
 
-def require_type(expected_type: type) -> Callable[[Any], Tuple[bool, str]]:
-    return lambda x: (isinstance(x, expected_type), f"Expected {expected_type.__name__}, got {type(x).__name__}")
-
-
-def require_keys(*keys: str) -> Callable[[Dict], Tuple[bool, str]]:
-    return lambda d: (
-        isinstance(d, dict) and all(k in d for k in keys),
-        f"Missing required key(s) from {list(keys)}"
-    )
-
-
-def require_positive_id(d: Dict) -> Tuple[bool, str]:
-    val = d.get("id", -1) if isinstance(d, dict) else -1
-    return (isinstance(val, int) and val > 0, "Field 'id' must be a positive integer")
-
-
-class TaskStreamProcessor:
-    def __init__(self):
-        rule_set_1 = ValidationPipeline(require_type(dict))
-        rule_set_2 = ValidationPipeline(require_keys("id", "payload"), require_positive_id)
-        self.validator = rule_set_1 & rule_set_2
-
-    def process_loop(self, incoming_stream: List[Any]) -> Generator[Dict[str, Any], None, None]:
-        """Main processing loop with dynamic stream validation."""
-        for index, raw_item in enumerate(incoming_stream):
-            valid, errors = self.validator.validate(raw_item)
-            if not valid:
-                yield {
-                    "status": "rejected",
-                    "index": index,
-                    "reasons": errors,
-                    "payload": raw_item
-                }
-                continue
-
-            yield {
-                "status": "processed",
-                "index": index,
-                "task_id": raw_item["id"],
-                "result": str(raw_item["payload"])[::-1]
-            }
+def morph_data(data: Dict[str, Any], operations: List[Callable]) -> Dict[str, Any]:
+    """Applies sequential processing operations over arbitrary dict shapes."""
+    proc = NestedMapProcessor(data)
+    for op in operations:
+        proc = proc >> op
+    return proc.raw
