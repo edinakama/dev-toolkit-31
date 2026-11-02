@@ -1,32 +1,41 @@
-import logging
-from typing import Any, Dict, Callable
+import time
+import functools
+import random
 
-class DataHandler:
-    def __init__(self, registry: Dict[str, Callable] = None):
-        self._registry = registry or {}
-        self._logger = logging.getLogger('dev-toolkit-31')
+def exponential_backoff(max_retries=3, base_delay=0.5):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            while attempts < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts >= max_retries:
+                        raise e
+                    sleep_time = (base_delay * (2 ** (attempts - 1))) + (random.uniform(0, 0.1))
+                    time.sleep(sleep_time)
+        return wrapper
+    return decorator
 
-    def register_processor(self, key: str, func: Callable):
-        self._registry[key] = func
+class NetworkHandler:
+    def __init__(self):
+        self.history = []
 
-    def dispatch(self, task_type: str, data: Any) -> Any:
-        processor = self._registry.get(task_type)
-        if not processor:
-            self._logger.error(f'unregistered task: {task_type}')
-            raise ValueError(f'No processor for {task_type}')
-        
+    @exponential_backoff(max_retries=4, base_delay=1.0)
+    def fetch_resource(self, url):
+        # Simulate unstable network condition
+        if random.random() < 0.7:
+            raise ConnectionError(f"Failed to reach {url}")
+        return f"Data from {url}"
+
+def process_network_queue(urls):
+    handler = NetworkHandler()
+    results = {}
+    for url in urls:
         try:
-            result = processor(data)
-            return result
-        except Exception as e:
-            self._logger.exception('execution failure in handler')
-            raise e
-
-    def pipeline(self, stream: list):
-        return [self.dispatch(t['type'], t['data']) for t in stream]
-
-def create_default_handler() -> DataHandler:
-    handler = DataHandler()
-    handler.register_processor('echo', lambda x: f'echo: {x}')
-    handler.register_processor('upper', lambda x: str(x).upper())
-    return handler
+            results[url] = handler.fetch_resource(url)
+        except Exception:
+            results[url] = None
+    return results
