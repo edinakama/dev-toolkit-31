@@ -1,62 +1,32 @@
 import json
 import os
-from pathlib import Path
-from typing import Any, Dict, Union, Optional
-
+from typing import Any, Dict
 
 class ConfigLoader:
-    """Dynamic configuration loader with default cascading and env overrides."""
+    """dynamic configuration injector with fallback recursion"""
+    def __init__(self, defaults: Dict[str, Any]):
+        self._data = defaults
 
-    def __init__(self, defaults: Optional[Dict[str, Any]] = None) -> None:
-        self._defaults = defaults or {}
-        self._store: Dict[str, Any] = {}
-
-    def load_dict(self, data: Dict[str, Any]) -> "ConfigLoader":
-        self._store.update(data)
+    def load(self, path: str) -> 'ConfigLoader':
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                user_config = json.load(f)
+                self._deep_merge(self._data, user_config)
         return self
 
-    def load_json(self, path: Union[str, Path]) -> "ConfigLoader":
-        file_path = Path(path)
-        if file_path.exists():
-            with file_path.open("r", encoding="utf-8") as f:
-                self._store.update(json.load(f))
-        return self
-
-    def _fetch(self, key: str) -> Any:
-        env_var = f"CONFIG_{key.upper()}"
-        if env_var in os.environ:
-            raw = os.environ[env_var]
-            if raw.isdigit():
-                return int(raw)
-            if raw.lower() in ("true", "false"):
-                return raw.lower() == "true"
-            return raw
-
-        if key in self._store:
-            val = self._store[key]
-        elif key in self._defaults:
-            val = self._defaults[key]
-        else:
-            raise KeyError(f"Configuration option '{key}' is undefined")
-
-        if isinstance(val, dict):
-            sub_defaults = self._defaults.get(key, {})
-            if not isinstance(sub_defaults, dict):
-                sub_defaults = {}
-            return ConfigLoader(sub_defaults).load_dict(val)
-        return val
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self._fetch(name)
-        except KeyError as err:
-            raise AttributeError(err) from err
-
-    def __getitem__(self, item: str) -> Any:
-        return self._fetch(item)
+    def _deep_merge(self, base: dict, overlay: dict):
+        for key, value in overlay.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                self._deep_merge(base[key], value)
+            else:
+                base[key] = value
 
     def get(self, key: str, default: Any = None) -> Any:
-        try:
-            return self._fetch(key)
-        except KeyError:
-            return default
+        return self._data.get(key, default)
+
+    def __getattr__(self, name: str) -> Any:
+        return self._data.get(name)
+
+def get_config(path: str = 'settings.json') -> ConfigLoader:
+    defaults = {'host': 'localhost', 'port': 8080, 'debug': False}
+    return ConfigLoader(defaults).load(path)
