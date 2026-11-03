@@ -1,40 +1,36 @@
-import functools
-import time
-import uuid
-from typing import Callable, Any
+import os
+from typing import Dict, Any, List
 
-def memoize_with_expiry(ttl: int = 60):
-    def decorator(func: Callable):
-        cache = {}
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in cache and now - cache[key]['ts'] < ttl:
-                return cache[key]['val']
-            result = func(*args, **kwargs)
-            cache[key] = {'val': result, 'ts': now}
-            return result
-        return wrapper
-    return decorator
+class DataOrchestrator:
+    def __init__(self, workspace: str):
+        self.root = os.path.abspath(workspace)
+        self.registry: Dict[str, List[Any]] = {}
 
-def generate_slug(prefix: str = 'dev') -> str:
-    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+    def ingest(self, key: str, payload: Any) -> None:
+        if key not in self.registry:
+            self.registry[key] = []
+        self.registry[key].append(payload)
 
-def batch_process(items: list, size: int):
-    return [items[i:i + size] for i in range(0, len(items), size)]
+    def purge(self) -> None:
+        self.registry.clear()
 
-def retry_operation(attempts: int = 3, delay: float = 1.0):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_ex = None
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay * (2 ** i))
-            raise last_ex
-        return wrapper
-    return decorator
+    @property
+    def manifest(self) -> List[str]:
+        return sorted(self.registry.keys())
+
+    def serialize(self) -> Dict[str, Any]:
+        return {k: [str(v) for v in vs] for k, vs in self.registry.items()}
+
+    def __repr__(self) -> str:
+        return f"<Orchestrator root={self.root} keys={len(self.manifest)}>"
+
+def initialize_environment(path: str = ".") -> DataOrchestrator:
+    instance = DataOrchestrator(path)
+    if not os.path.exists(instance.root):
+        os.makedirs(instance.root, exist_ok=True)
+    return instance
+
+if __name__ == "__main__":
+    orchestrator = initialize_environment()
+    orchestrator.ingest("config", {"mode": "debug"})
+    print(orchestrator)
