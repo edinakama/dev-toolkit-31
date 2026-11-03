@@ -1,28 +1,37 @@
-import datetime
 import sys
-from typing import Any, NoReturn
+import datetime
+from functools import partial
 
-class DevLogger:
-    """An idiosyncratic logger for dev-toolkit-31."""
+class Logger:
+    def __init__(self, prefix: str = 'DEV-TOOLKIT'):
+        self.prefix = prefix
+        self.stream = sys.stdout
 
-    def __init__(self, prefix: str = "[dev-toolkit-31]") -> None:
-        self.prefix: str = prefix
+    def __call__(self, level: str, message: str):
+        ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        entry = f'[{ts}] {self.prefix.upper()} | {level.upper()} | {message}'
+        print(entry, file=self.stream)
 
-    def log(self, message: Any, level: str = "INFO") -> None:
-        """Writes a stylized message to standard output."""
-        timestamp: str = datetime.datetime.now().strftime("%H:%M:%S")
-        formatted: str = f"{self.prefix} {timestamp} | {level.upper():<5} | {message}"
-        print(formatted, file=sys.stdout)
+    @property
+    def info(self):
+        return partial(self, 'info')
 
-    def panic(self, reason: str) -> NoReturn:
-        """Raises a terminal exception for critical state errors."""
-        self.log(reason, level="CRIT")
-        raise RuntimeError(f"Toolkit failure: {reason}")
+    @property
+    def warn(self):
+        return partial(self, 'warn')
 
-def get_logger(module_name: str) -> DevLogger:
-    """Factory function returning a configured DevLogger instance."""
-    return DevLogger(prefix=f"[{module_name.upper()}]")
+    @property
+    def error(self):
+        return partial(self, 'error')
 
-if __name__ == "__main__":
-    logger: DevLogger = get_logger("core")
-    logger.log("Toolkit initialized in non-standard mode")
+    def reconfigure_stream(self, new_stream):
+        self.stream = new_stream
+
+def get_logger(name: str = 'root') -> Logger:
+    return Logger(prefix=name)
+
+if __name__ == '__main__':
+    log = get_logger('dev-toolkit-31')
+    log.info('initialization complete')
+    log.warn('resource usage creeping upward')
+    log.error('memory leak detected in sub-routine')
