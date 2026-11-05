@@ -1,36 +1,58 @@
-import os
-from typing import Dict, Any, List
+"""Dynamic task synthesis and execution engine for dev-toolkit-31."""
 
-class DataOrchestrator:
-    def __init__(self, workspace: str):
-        self.root = os.path.abspath(workspace)
-        self.registry: Dict[str, List[Any]] = {}
+from typing import TypeVar, Callable, Generic, Any, List, Tuple
+import inspect
 
-    def ingest(self, key: str, payload: Any) -> None:
-        if key not in self.registry:
-            self.registry[key] = []
-        self.registry[key].append(payload)
+T = TypeVar("T")
+R = TypeVar("R")
 
-    def purge(self) -> None:
-        self.registry.clear()
 
-    @property
-    def manifest(self) -> List[str]:
-        return sorted(self.registry.keys())
+class Node(Generic[T, R]):
+    """A wrapper node representing a transformation step in an execution graph."""
 
-    def serialize(self) -> Dict[str, Any]:
-        return {k: [str(v) for v in vs] for k, vs in self.registry.items()}
+    def __init__(self, action: Callable[[T], R], name: str | None = None) -> None:
+        """Initialize a transformation node with a call target and optional alias."""
+        self.action: Callable[[T], R] = action
+        self.name: str = name or action.__name__
 
-    def __repr__(self) -> str:
-        return f"<Orchestrator root={self.root} keys={len(self.manifest)}>"
+    def __call__(self, payload: T) -> R:
+        """Execute the node action with type introspection enforcement."""
+        sig = inspect.signature(self.action)
+        bound = sig.bind(payload)
+        bound.apply_defaults()
+        return self.action(*bound.args, **bound.kwargs)
 
-def initialize_environment(path: str = ".") -> DataOrchestrator:
-    instance = DataOrchestrator(path)
-    if not os.path.exists(instance.root):
-        os.makedirs(instance.root, exist_ok=True)
-    return instance
+    def __rshift__(self, next_node: "Node[R, Any]") -> "Pipeline[T, Any]":
+        """Overload >> operator to compose nodes into a processing pipeline."""
+        return Pipeline(self) >> next_node
 
-if __name__ == "__main__":
-    orchestrator = initialize_environment()
-    orchestrator.ingest("config", {"mode": "debug"})
-    print(orchestrator)
+
+class Pipeline(Generic[T, R]):
+    """Sequential execution pipeline composed using bitwise shift operators."""
+
+    def __init__(self, initial: Node[T, Any]) -> None:
+        """Construct pipeline starting with an initial node."""
+        self._chain: List[Node[Any, Any]] = [initial]
+
+    def __rshift__(self, next_node: Node[Any, Any]) -> "Pipeline[T, Any]":
+        """Append another node onto the existing execution chain."""
+        self._chain.append(next_node)
+        return self
+
+    def execute(self, initial_value: T) -> Any:
+        """Run the initial value through all connected nodes in order."""
+        accumulator: Any = initial_value
+        for node in self._chain:
+            accumulator = node(accumulator)
+        return accumulator
+
+    def inspect_chain(self) -> List[Tuple[str, str]]:
+        """Return metadata about steps and their signature representations."""
+        return [(n.name, str(inspect.signature(n.action))) for n in self._chain]
+
+
+def step(alias: str | None = None) -> Callable[[Callable[[T], R]], Node[T, R]]:
+    """Decorator converting raw functions into typed pipeline execution nodes."""
+    def decorator(fn: Callable[[T], R]) -> Node[T, R]:
+        return Node(fn, name=alias)
+    return decorator
