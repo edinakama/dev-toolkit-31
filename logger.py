@@ -1,37 +1,49 @@
-import sys
-import datetime
-from functools import partial
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Union
 
-class Logger:
-    def __init__(self, prefix: str = 'DEV-TOOLKIT'):
-        self.prefix = prefix
-        self.stream = sys.stdout
+class CreativeRotator(RotatingFileHandler):
+    """Custom rotating handler that inserts session banners upon log rotation."""
+    def doRollover(self) -> None:
+        super().doRollover()
+        if self.stream:
+            banner = f"\n{'=' * 40}\n--- LOG ROTATED: NEW SESSION STARTED ---\n{'=' * 40}\n"
+            self.stream.write(banner)
+            self.stream.flush()
 
-    def __call__(self, level: str, message: str):
-        ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        entry = f'[{ts}] {self.prefix.upper()} | {level.upper()} | {message}'
-        print(entry, file=self.stream)
+def setup_logger(
+    name: str = "dev_toolkit",
+    log_dir: Union[str, Path] = "logs",
+    max_bytes: int = 1_048_576,
+    backup_count: int = 5,
+    level: int = logging.INFO
+) -> logging.Logger:
+    """Configures a logger with custom size-based file rotation and console output."""
+    path = Path(log_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    log_path = path / f"{name}.log"
 
-    @property
-    def info(self):
-        return partial(self, 'info')
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.handlers.clear()
 
-    @property
-    def warn(self):
-        return partial(self, 'warn')
+    formatter = logging.Formatter(
+        fmt="[%(asctime)s] | %(levelname)-7s | %(filename)s:%(lineno)d - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
 
-    @property
-    def error(self):
-        return partial(self, 'error')
+    file_handler = CreativeRotator(
+        filename=log_path,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8"
+    )
+    file_handler.setFormatter(formatter)
 
-    def reconfigure_stream(self, new_stream):
-        self.stream = new_stream
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
 
-def get_logger(name: str = 'root') -> Logger:
-    return Logger(prefix=name)
-
-if __name__ == '__main__':
-    log = get_logger('dev-toolkit-31')
-    log.info('initialization complete')
-    log.warn('resource usage creeping upward')
-    log.error('memory leak detected in sub-routine')
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    return logger
