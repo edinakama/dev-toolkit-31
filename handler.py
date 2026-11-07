@@ -1,41 +1,56 @@
-import time
-import functools
-import random
+import sys
+import math
+from typing import Callable, Any, Dict, Optional
 
-def exponential_backoff(max_retries=3, base_delay=0.5):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            attempts = 0
-            while attempts < max_retries:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    attempts += 1
-                    if attempts >= max_retries:
-                        raise e
-                    sleep_time = (base_delay * (2 ** (attempts - 1))) + (random.uniform(0, 0.1))
-                    time.sleep(sleep_time)
+
+class EdgeCaseGuard:
+    """Dynamic resilience wrapper handling extreme inputs and runtime anomalies."""
+
+    DEFAULT_FALLBACKS: Dict[type, Any] = {
+        ZeroDivisionError: float("nan"),
+        OverflowError: sys.float_info.max,
+        RecursionError: None,
+        TypeError: "",
+        ValueError: None,
+        KeyError: None,
+        IndexError: None,
+    }
+
+    def __init__(self, custom_fallbacks: Optional[Dict[type, Any]] = None):
+        self.fallbacks = {**self.DEFAULT_FALLBACKS, **(custom_fallbacks or {})}
+
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            sanitized_args = tuple(self._sanitize(a) for a in args)
+            sanitized_kwargs = {k: self._sanitize(v) for k, v in kwargs.items()}
+
+            try:
+                res = func(*sanitized_args, **sanitized_kwargs)
+                return self._sanitize(res)
+            except Exception as exc:
+                for exc_type, fallback in self.fallbacks.items():
+                    if isinstance(exc, exc_type):
+                        if callable(fallback):
+                            return fallback(exc, *args, **kwargs)
+                        return fallback
+                raise exc
+
         return wrapper
-    return decorator
 
-class NetworkHandler:
-    def __init__(self):
-        self.history = []
+    def _sanitize(self, value: Any) -> Any:
+        """Neutralize radioactive edge case values like Inf, NaN, and deep nesting."""
+        if isinstance(value, float):
+            if math.isnan(value):
+                return 0.0
+            if math.isinf(value):
+                return sys.float_info.max if value > 0 else -sys.float_info.max
+        elif isinstance(value, (list, tuple)):
+            return type(value)(self._sanitize(v) for v in value)
+        elif isinstance(value, dict):
+            return {k: self._sanitize(v) for k, v in value.items()}
+        return value
 
-    @exponential_backoff(max_retries=4, base_delay=1.0)
-    def fetch_resource(self, url):
-        # Simulate unstable network condition
-        if random.random() < 0.7:
-            raise ConnectionError(f"Failed to reach {url}")
-        return f"Data from {url}"
 
-def process_network_queue(urls):
-    handler = NetworkHandler()
-    results = {}
-    for url in urls:
-        try:
-            results[url] = handler.fetch_resource(url)
-        except Exception:
-            results[url] = None
-    return results
+def safe_execute(target_func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    guard = EdgeCaseGuard()
+    return guard(target_func)(*args, **kwargs)
