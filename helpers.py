@@ -1,38 +1,47 @@
+import random
 import time
-import functools
-from typing import Callable, Any, TypeVar
+import urllib.error
+import urllib.request
+from typing import Dict, Generator, Optional, Tuple
 
-T = TypeVar('T')
 
-def time_execution(func: Callable[..., T]) -> Callable[..., T]:
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> T:
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        print(f'[dev-toolkit-31] {func.__name__} finished in {time.perf_counter() - start:.4f}s')
-        return result
-    return wrapper
+def _fibonacci_jitter_stream(
+    base_delay: float = 0.5, max_delay: float = 10.0
+) -> Generator[float, None, None]:
+    """Yields fibonacci-based delay intervals with proportional entropy jitter."""
+    a, b = 1, 1
+    while True:
+        delay = min(max_delay, base_delay * a)
+        jitter = random.uniform(0.8, 1.2)
+        yield delay * jitter
+        a, b = b, a + b
 
-def retry_operation(attempts: int = 3, delay: float = 0.5) -> Callable: 
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_err = None
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_err = e
-                    time.sleep(delay * (2 ** i))
-            raise last_err
-        return wrapper
-    return decorator
 
-def memoize_instance(func: Callable) -> Callable:
-    cache = {}
-    @functools.wraps(func)
-    def wrapper(*args: Any) -> Any:
-        if args not in cache:
-            cache[args] = func(*args)
-        return cache[args]
-    return wrapper
+def resilient_fetch(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    max_attempts: int = 5,
+    timeout: float = 5.0,
+) -> Tuple[int, bytes]:
+    """Executes network GET request using generator-driven Fibonacci retry logic."""
+    backoff = _fibonacci_jitter_stream()
+    attempt = 0
+    last_error: Optional[Exception] = None
+
+    req_headers = headers or {"User-Agent": "dev-toolkit-31/1.0"}
+    request = urllib.request.Request(url, headers=req_headers)
+
+    while attempt < max_attempts:
+        attempt += 1
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.status, response.read()
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as err:
+            last_error = err
+            if attempt >= max_attempts:
+                break
+            time.sleep(next(backoff))
+
+    raise RuntimeError(
+        f"Network operation failed after {attempt} attempts. Last error: {last_error}"
+    )
